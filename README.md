@@ -26,6 +26,21 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 
 Works with mouse and touch (pointer events throughout).
 
+## Recipes (all play-tested)
+
+- **Caterpillar** — drop same-color balls in a line one ball apart; they weld into a
+  segmented body on landing. Eyes on the front one.
+- **Flower** — one ball as the center, a ring of six balls around it, then hold each
+  ring ball to flatten it into a petal. (Place balls first — discs roll like coins.)
+- **Snail** — a sausage for the body, drop a ball onto its back for the shell.
+- **Snowman** — stack two balls, add eyes, mouth and the hat.
+- **Octopus** — stack two balls, surround with a ring of balls, morph each into a
+  sausage; random orientations read as sprawling tentacles.
+- **Doughnut / thumbprint cookie** — flatten a ball, then knead (🤏) the center
+  repeatedly for a doughnut, or a ring of pokes for a crinkle-edge cookie.
+- Tip: to attach a piece high (Mickey ears), release the instant it sticks — and know
+  that a top-heavy build will tip over, just like real clay.
+
 ## Run
 
 No build step, no dependencies to install — three.js r185 and box3d.js 0.0.2 (inline-WASM
