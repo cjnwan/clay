@@ -70,6 +70,25 @@ let pendingHop = null;           // { rec, timer }：单击的跳跃延迟到双
 let kneading = false;            // 🤏 捏捏模式
 let dentStrength = 0;            // 凹坑负 metaball 强度（init 里按 isolation 算）
 let stickyEnabled = true;
+let demoRun = null;              // 🎬 表演模式的运行令牌（置 null 即中止）
+let demoIndex = 0;
+let demoArmedAt = 0;             // 有作品时需要 2.5s 内再点一次确认
+let hintEl = null;
+let defaultHint = '';
+
+const KNEAD_HINT = '🤏 在黏土上按一按、划一划就能捏出坑 · 再点 🤏 收手';
+
+function setHint( text ) {
+
+	if ( hintEl ) hintEl.textContent = text;
+
+}
+
+function resetHint() {
+
+	setHint( kneading ? KNEAD_HINT : defaultHint );
+
+}
 let stepCount = 0;
 let lastDirty = 0;
 let builtOnce = false;
@@ -1084,6 +1103,7 @@ function setupPointer() {
 
 		if ( session ) return;
 		ensureAudio();
+		stopDemo();
 		setRay( e );
 
 		const rec = pickBall();
@@ -1157,6 +1177,7 @@ function setupUI() {
 			if ( session ) return;
 			e.preventDefault();
 			ensureAudio();
+			stopDemo();
 			selectColor( i );
 			beginSession( { type: 'palette', kind: 'clay', colorIndex: i, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false, pending: true } );
 
@@ -1174,6 +1195,7 @@ function setupUI() {
 			if ( session ) return;
 			e.preventDefault();
 			ensureAudio();
+			stopDemo();
 			beginSession( { type: 'palette', kind, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false, pending: true } );
 
 		} );
@@ -1182,17 +1204,41 @@ function setupUI() {
 
 	// 🤏 捏捏模式开关
 	const kneadBtn = document.getElementById( 'kneadBtn' );
-	const hintEl = document.getElementById( 'hint' );
-	const defaultHint = hintEl.textContent;
+	hintEl = document.getElementById( 'hint' );
+	defaultHint = hintEl.textContent;
 
 	kneadBtn.addEventListener( 'pointerdown', ( e ) => {
 
 		if ( session ) return;
 		e.preventDefault();
 		ensureAudio();
+		stopDemo();
 		kneading = ! kneading;
 		kneadBtn.classList.toggle( 'selected', kneading );
-		hintEl.textContent = kneading ? '🤏 在黏土上按一按、划一划就能捏出坑 · 再点 🤏 收手' : defaultHint;
+		resetHint();
+
+	} );
+
+	// 🎬 看表演：游戏自己捏一个造型给你看
+	document.getElementById( 'demoBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		if ( session ) return;
+		e.preventDefault();
+		ensureAudio();
+
+		if ( demoRun ) { stopDemo(); return; }
+
+		// 盘上有作品时，2.5 秒内再点一次才开演（开演会收走作品）
+		if ( balls.length > 4 && performance.now() - demoArmedAt > 2600 ) {
+
+			demoArmedAt = performance.now();
+			setHint( '再点一下 🎬 开始表演（会收走现在的作品哦）' );
+			setTimeout( () => { if ( ! demoRun ) resetHint(); }, 2600 );
+			return;
+
+		}
+
+		startDemo();
 
 	} );
 
@@ -1214,6 +1260,7 @@ function setupUI() {
 		if ( session ) return;
 		e.preventDefault();
 		ensureAudio();
+		stopDemo();
 		clearBtn.classList.add( 'holding' );
 		clearHold = setTimeout( () => {
 
@@ -1228,6 +1275,161 @@ function setupUI() {
 	for ( const type of [ 'pointerup', 'pointerleave', 'pointercancel' ] ) {
 
 		clearBtn.addEventListener( type, cancelClearHold );
+
+	}
+
+}
+
+// ---------- 🎬 表演模式：游戏当面捏一遍食谱，带解说 ----------
+
+function stopDemo() {
+
+	if ( ! demoRun ) return;
+	demoRun = null;
+	resetHint();
+
+}
+
+// 六个实测过的食谱。坐标都来自验证脚本，节奏按真人观看调慢
+const DEMO_RECIPES = [
+	{ name: '雪人', run: async ( S ) => {
+
+		S.say( '先放一颗球' );
+		S.clay( 0, 0.25, 4 ); await S.wait( 1100 );
+		S.say( '再叠一颗，黏住啦' );
+		S.clay( 0.02, 0.27, 4 ); await S.wait( 1400 );
+		S.say( '戴顶帽子' );
+		S.decor( 'hat', 0, 0.2 ); await S.wait( 1100 );
+		S.say( '贴眼睛和嘴巴' );
+		S.eye( - 0.15, 0.62 ); await S.wait( 800 );
+		S.eye( 0.17, 0.64 ); await S.wait( 800 );
+		S.decor( 'mouth', 0.01, 0.6 ); await S.wait( 1400 );
+
+	} },
+	{ name: '毛毛虫', run: async ( S ) => {
+
+		S.say( '把小球排成一行，它们会自己黏住' );
+		for ( let i = 0; i < 4; i ++ ) { S.clay( - 1.6 + i * 1.05, 0.3, 3 ); await S.wait( 1200 ); }
+		S.say( '头上贴两只眼睛' );
+		S.eye( - 1.78, 0.42 ); await S.wait( 900 );
+		S.eye( - 1.42, 0.44 ); await S.wait( 1400 );
+
+	} },
+	{ name: '小花', run: async ( S ) => {
+
+		S.say( '中间放一颗花心' );
+		S.clay( 0, 0, 2 ); await S.wait( 1100 );
+		S.say( '周围摆一圈小球' );
+		const petals = [];
+		for ( let i = 0; i < 6; i ++ ) {
+
+			const a = i / 6 * Math.PI * 2;
+			petals.push( S.clay( Math.cos( a ) * 1.22, Math.sin( a ) * 1.22, 0 ) );
+			await S.wait( 1000 );
+
+		}
+		S.say( '挨个按住，压扁成花瓣！' );
+		for ( const p of petals ) { S.morph( p ); await S.wait( 900 ); }
+		await S.wait( 1200 );
+
+	} },
+	{ name: '蜗牛', run: async ( S ) => {
+
+		S.say( '放一颗球' );
+		const b = S.clay( 0.3, 0.4, 5 ); await S.wait( 1100 );
+		S.say( '按住两下：搓成香肠身体' );
+		S.morph( b ); await S.wait( 900 );
+		S.morph( b ); await S.wait( 1300 );
+		S.say( '背上放一颗球当壳' );
+		const p = S.pos( b );
+		if ( p ) S.clay( p.x, p.z, 0 );
+		await S.wait( 1600 );
+
+	} },
+	{ name: '章鱼', run: async ( S ) => {
+
+		S.say( '叠两颗球做身体' );
+		S.clay( 0, - 0.1, 5 ); await S.wait( 1100 );
+		S.clay( 0.02, - 0.08, 5 ); await S.wait( 1400 );
+		S.say( '周围摆四颗球' );
+		const legs = [];
+		for ( const deg of [ 25, 115, 205, 295 ] ) {
+
+			const a = deg * Math.PI / 180;
+			legs.push( S.clay( Math.cos( a ) * 1.2, - 0.1 + Math.sin( a ) * 1.2, 5 ) );
+			await S.wait( 1000 );
+
+		}
+		S.say( '挨个搓长，就是触手！' );
+		for ( const t of legs ) { S.morph( t ); await S.wait( 600 ); S.morph( t ); await S.wait( 800 ); }
+		S.say( '贴上眼睛' );
+		S.eye( - 0.2, 0.32 ); await S.wait( 800 );
+		S.eye( 0.24, 0.34 ); await S.wait( 1400 );
+
+	} },
+	{ name: '甜甜圈', run: async ( S ) => {
+
+		S.say( '一颗球，按住变扁' );
+		const d = S.clay( 0, 0.3, 2 ); await S.wait( 1100 );
+		S.morph( d ); await S.wait( 1300 );
+		S.say( '🤏 往中间使劲戳！' );
+		for ( let k = 0; k < 8; k ++ ) { S.poke( d, 0, 1, 0 ); await S.wait( 320 ); }
+		await S.wait( 1300 );
+
+	} },
+];
+
+async function startDemo() {
+
+	stopDemo();
+	clearAll();
+
+	const recipe = DEMO_RECIPES[ demoIndex % DEMO_RECIPES.length ];
+	demoIndex ++;
+	const token = { name: recipe.name };
+	demoRun = token;
+
+	// 中途被打断（用户碰画布/按钮）时 wait 会 reject，直接静默收场
+	const S = {
+		wait: ( ms ) => new Promise( ( resolve, reject ) => {
+
+			setTimeout( () => ( demoRun === token ? resolve() : reject( new Error( 'demo-stopped' ) ) ), ms );
+
+		} ),
+		say: ( t ) => setHint( '🎬 ' + recipe.name + '：' + t ),
+		clay: ( x, z, c ) => createClay( x, 3, z, c ),
+		decor: ( kind, x, z ) => createDecor( kind, x, 3, z ),
+		eye: ( x, z ) => createDecor( 'eye', x, 3, z ),
+		morph: ( rec ) => { if ( rec && rec.alive ) setForm( rec, ( rec.form + 1 ) % FORMS.length ); },
+		pos: ( rec ) => ( rec && rec.alive ? b3.b3Body_GetPosition( rec.body ) : null ),
+		poke: ( rec, ox, oy, oz ) => {
+
+			if ( ! rec || ! rec.alive ) return;
+			const p = b3.b3Body_GetPosition( rec.body );
+			const len = Math.hypot( ox, oy, oz ) || 1;
+			const r = rec.form === 0 ? CLAY_R_VIS : FORMS[ rec.form ].pickR * 0.85;
+			addDentAt( rec, { x: p.x + ox / len * r, y: p.y + oy / len * r, z: p.z + oz / len * r } );
+
+		},
+	};
+
+	try {
+
+		await recipe.run( S );
+		if ( demoRun === token ) {
+
+			setHint( '🎬 轮到你啦！照着捏一个 →' );
+			setTimeout( () => {
+
+				if ( demoRun === token ) { demoRun = null; resetHint(); }
+
+			}, 3500 );
+
+		}
+
+	} catch ( err ) {
+
+		// demo-stopped：孩子接管了，安静退场
 
 	}
 

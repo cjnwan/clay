@@ -28,6 +28,10 @@ Works with mouse and touch (pointer events throughout).
 
 ## Recipes (all play-tested)
 
+**Or just tap 🎬 in the game** — it builds one of these for you live, with step-by-step
+narration, then hands the board over. Tap 🎬 again for the next recipe; touch anything
+to take over mid-show.
+
 - **Caterpillar** — drop same-color balls in a line one ball apart; they weld into a
   segmented body on landing. Eyes on the front one.
 - **Flower** — one ball as the center, a ring of six balls around it, then hold each
