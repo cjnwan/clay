@@ -467,9 +467,28 @@ function addDentAt( rec, wp ) {
 	const q = b3.b3Body_GetRotation( rec.body );
 	_q.set( q.v.x, q.v.y, q.v.z, q.s ).invert();
 	const lp = new THREE.Vector3( wp.x - p.x, wp.y - p.y, wp.z - p.z ).applyQuaternion( _q );
-	// 往中心压进一点，坑才咬得进表面
-	const len = lp.length();
-	if ( len > 0.001 ) lp.multiplyScalar( Math.max( 0, len - 0.14 ) / len );
+
+	// 把落点压到该形态的表面内侧一点：负球只有咬进等值面内才有可见效果
+	if ( rec.form === 1 ) {
+
+		// 圆盘：厚度方向压到皮下，径向不出边
+		lp.y = THREE.MathUtils.clamp( lp.y, - 0.18, 0.18 );
+		const r = Math.hypot( lp.x, lp.z );
+		if ( r > 0.5 ) { const s = 0.5 / r; lp.x *= s; lp.z *= s; }
+
+	} else if ( rec.form === 2 ) {
+
+		// 香肠：轴向夹在两端内，径向压到皮下
+		lp.x = THREE.MathUtils.clamp( lp.x, - 0.7, 0.7 );
+		const r = Math.hypot( lp.y, lp.z );
+		if ( r > 0.28 ) { const s = 0.28 / r; lp.y *= s; lp.z *= s; }
+
+	} else {
+
+		const len = lp.length();
+		if ( len > 0.001 ) lp.multiplyScalar( Math.max( 0, len - 0.14 ) / len );
+
+	}
 	rec.dents.push( [ lp.x, lp.y, lp.z ] );
 	if ( rec.dents.length > MAX_DENTS ) rec.dents.shift();
 	markDirty();
