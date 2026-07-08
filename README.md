@@ -1,5 +1,8 @@
 # 捏黏土 (Clay)
 
+**Play it: <https://cjnwan.github.io/clay/>** — works on phones and tablets
+(iOS 16.4+ / Android Chrome 89+).
+
 A tactile clay toy for kids, in the spirit of [mrdoob/toys](https://github.com/mrdoob/toys):
 drop colorful clay balls onto a board, squish them around, and they stick together like
 real playdough. Give your creation googly eyes.
@@ -25,8 +28,9 @@ Works with mouse and touch (pointer events throughout).
 
 ## Run
 
-No build step, no dependencies to install — everything loads from CDN via an import map
-(three.js r185, box3d.js 0.0.2 inline-WASM build). Just serve the directory statically:
+No build step, no dependencies to install — three.js r185 and box3d.js 0.0.2 (inline-WASM
+build) are vendored under `vendor/` and wired up via an import map, so the page is fully
+self-hosted (no CDN at runtime). Just serve the directory statically:
 
 ```sh
 npx http-server -p 8917
