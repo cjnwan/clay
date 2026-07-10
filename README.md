@@ -17,7 +17,9 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **Drag from the palette** — carry a fresh ball anywhere.
 - **Drag clay** — move it; a welded creation moves as one piece.
 - **Bring pieces together slowly** — they stick.
-- **Press and hold clay** — it morphs: ball → squashed pancake → rolled sausage → ball.
+- **Press and hold clay** — it morphs: ball → squashed pancake → rolled sausage → brick → ball.
+- **● size** — cycle small / medium / large for new clay: proportions make creatures.
+- **🐍 snake** — a soft chain of linked segments; lift one end and the rest dangles.
 - **🤏 knead mode** — toggle it, then press and drag on clay to poke dents and carve
   grooves; going over the same spot again digs deeper. Toggle again to go back to dragging.
 - **Tap a piece** — it hops. **Double-tap** — it pops off whatever it was stuck to.
@@ -62,13 +64,16 @@ A `window.__clay` debug handle is exposed in the console: `state()`, `spawn(x, z
 
 ## How it works
 
-- Each clay piece is a dynamic body in a box3d world (fixed 1/60 timestep, 4 substeps).
-  Morphing swaps its collision shape: sphere → hand-built centered disc hull → capsule.
+- Each clay piece is a dynamic body in a box3d world (fixed 1/60 timestep, 4 substeps),
+  scaled by one of three size factors. Morphing swaps its collision shape:
+  sphere → hand-built centered disc hull → capsule → box.
   (Note: `b3CreateCylinder` produces a base-anchored hull spanning `y ∈ [0, h]`, not a
   centered one — hence the hand-built hull.)
 - Rendering is a single `MarchingCubes` field with per-ball colors; each form is a set of
   metaball "sub-balls" in body-local space (1 for ball, 9 for pancake, 3 for sausage), so
   deformed pieces tumble and merge correctly.
+- Snakes are chains of small spheres linked by spherical joints (excluded from cluster
+  dragging so they stay floppy).
 - A periodic O(n²) proximity pass welds slow-touching bodies together (`b3CreateWeldJoint`);
   decorations stick at higher approach speeds than clay. Dragging applies a velocity servo
   to the whole welded cluster; double-tap detaches with a re-stick cooldown.

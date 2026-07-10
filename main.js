@@ -28,7 +28,7 @@ const MAX_DENTS = 10;            // 每块黏土最多保留的凹坑数，满�
 const DENT_R = 0.3;              // 凹坑雕刻半径（负球在已有场里有效范围偏小，取大一点）
 const DENT_STEP = 0.2;           // 划动捏坑时相邻坑的最小间距（世界单位）
 
-// 黏土形态：按住循环切换。sub = metaball 子球（局部偏移 + 视觉半径，strength 在 init 里算）
+// 黏土形态：按住循环切换。sub = metaball 子球（局部偏移 + 视觉半径，均按件的大小系数 k 缩放）
 // pickR 用于点选包围球，stickR 用于黏住判定
 const FORMS = [
 	{ name: 'ball', pickR: 0.62, stickR: 0.5, sub: [ { o: [ 0, 0, 0 ], r: 0.62 } ] },
@@ -44,7 +44,18 @@ const FORMS = [
 		{ o: [ 0, 0, 0 ], r: 0.44 },
 		{ o: [ 0.44, 0, 0 ], r: 0.4 },
 	] },
+	{ name: 'brick', pickR: 0.72, stickR: 0.6, sub: [
+		{ o: [ - 0.22, 0, - 0.22 ], r: 0.34 },
+		{ o: [ 0.22, 0, - 0.22 ], r: 0.34 },
+		{ o: [ - 0.22, 0, 0.22 ], r: 0.34 },
+		{ o: [ 0.22, 0, 0.22 ], r: 0.34 },
+	] },
 ];
+
+// 三档大小（半径倍率）：小 / 中 / 大
+const SIZES = [ 0.72, 1, 1.4 ];
+const CHAIN_SEGS = 4;            // 🐍 软链的节数
+const CHAIN_K = 0.68;            // 链节相对当前档的大小
 
 // 贴件：r = 物理球半径，out = 焊到圆球黏土上时中心到黏土视觉表面的外推量
 const DECOR = {
@@ -63,12 +74,12 @@ const weldedKeys = new Set();
 const noStickUntil = new Map();  // pair key → 时间戳：拆开后的冷却期内不再自动焊回
 let nextId = 1;
 let selected = 0;
+let sizeIndex = 1;               // ⚪ 当前大小档
 let drag = null;                 // { rec, target: Vector3 }
 let session = null;              // 当前指针会话
 let lastTap = { rec: null, t: 0 };
 let pendingHop = null;           // { rec, timer }：单击的跳跃延迟到双击窗口之后
 let kneading = false;            // 🤏 捏捏模式
-let dentStrength = 0;            // 凹坑负 metaball 强度（init 里按 isolation 算）
 let stickyEnabled = true;
 let demoRun = null;              // 🎬 表演模式的运行令牌（置 null 即中止）
 let demoIndex = 0;
@@ -174,13 +185,6 @@ async function init() {
 	effect.receiveShadow = true;
 	scene.add( effect );
 
-	// 各形态 metaball 子球的强度（依赖 effect.isolation，所以放在 effect 创建之后）
-	for ( const f of FORMS ) {
-
-		for ( const s of f.sub ) s.strength = strengthFor( s.r );
-
-	}
-	dentStrength = strengthFor( DENT_R );
 
 	// 贴件的共享几何/材质与构造器。约定：网格的 +Z 朝外（焊接时转向黏土外侧）
 	{
@@ -338,13 +342,13 @@ function decorCount() {
 
 function pickRadiusOf( rec ) {
 
-	return rec.kind === 'clay' ? FORMS[ rec.form ].pickR : Math.max( rec.r * 1.6, 0.3 );
+	return rec.kind === 'clay' ? FORMS[ rec.form ].pickR * rec.k : Math.max( rec.r * 1.6, 0.3 );
 
 }
 
 function stickRadiusOf( rec ) {
 
-	return rec.kind === 'clay' ? FORMS[ rec.form ].stickR : rec.r;
+	return rec.kind === 'clay' ? FORMS[ rec.form ].stickR * rec.k : rec.r;
 
 }
 
@@ -372,11 +376,12 @@ function createBallBody( x, y, z, radius, friction, restitution ) {
 
 }
 
-function createClay( x, y, z, colorIndex, vel ) {
+function createClay( x, y, z, colorIndex, vel, kOverride ) {
 
 	if ( clayCount() >= MAX_CLAY ) { shakePalette(); return null; }
 
-	const { body, shape } = createBallBody( x, y, z, CLAY_R, 0.9, 0.05 );
+	const k = kOverride !== undefined ? kOverride : SIZES[ sizeIndex ];
+	const { body, shape } = createBallBody( x, y, z, CLAY_R * k, 0.9, 0.05 );
 	if ( vel ) b3.b3Body_SetLinearVelocity( body, vel );
 
 	const rec = {
@@ -385,8 +390,9 @@ function createClay( x, y, z, colorIndex, vel ) {
 		body,
 		shape,
 		form: 0,
+		k,
 		dents: [],
-		r: CLAY_R,
+		r: CLAY_R * k,
 		color: new THREE.Color( CLAY_COLORS[ colorIndex ] ),
 		mesh: null,
 		alive: true,
@@ -395,6 +401,55 @@ function createClay( x, y, z, colorIndex, vel ) {
 	markDirty();
 	plop();
 	return rec;
+
+}
+
+// 🐍 软链：几节小球用球关节串起来，软的，可以甩、可以搭在别的黏土上
+function createChain( x, z, colorIndex, kBase ) {
+
+	const k = ( kBase !== undefined ? kBase : SIZES[ sizeIndex ] ) * CHAIN_K;
+	const spacing = CLAY_R * k * 2.05;
+	const segs = [];
+	for ( let i = 0; i < CHAIN_SEGS; i ++ ) {
+
+		const rec = createClay( x + ( i - ( CHAIN_SEGS - 1 ) / 2 ) * spacing, 3 + i * 0.03, z, colorIndex, null, k );
+		if ( ! rec ) break;
+		segs.push( rec );
+
+	}
+
+	for ( let i = 0; i + 1 < segs.length; i ++ ) {
+
+		try {
+
+			const a = segs[ i ], b = segs[ i + 1 ];
+			const pa = b3.b3Body_GetPosition( a.body );
+			const pb = b3.b3Body_GetPosition( b.body );
+			const qa = b3.b3Body_GetRotation( a.body );
+			const qb = b3.b3Body_GetRotation( b.body );
+			const mid = { x: ( pa.x + pb.x ) / 2, y: ( pa.y + pb.y ) / 2, z: ( pa.z + pb.z ) / 2 };
+
+			const def = b3.b3DefaultSphericalJointDef();
+			def.base.bodyIdA = a.body;
+			def.base.bodyIdB = b.body;
+			def.base.localFrameA = localFrame( pa, qa, mid );
+			def.base.localFrameB = localFrame( pb, qb, mid );
+
+			const joint = b3.b3CreateSphericalJoint( world, def );
+			const key = weldKey( a.id, b.id );
+			// 记进 weldedKeys 防止 stickyPass 把链节焊死；chain 标记让拖拽时保持柔软
+			joints.push( { joint, aId: a.id, bId: b.id, key, chain: true } );
+			weldedKeys.add( key );
+
+		} catch ( err ) {
+
+			console.warn( 'chain joint failed:', err );
+			break;
+
+		}
+
+	}
+	return segs;
 
 }
 
@@ -427,6 +482,8 @@ function setForm( rec, form ) {
 	sd.baseMaterial.friction = 0.9;
 	sd.baseMaterial.restitution = 0.05;
 
+	const k = rec.k;
+
 	try {
 
 		b3.b3DestroyShape( rec.shape, true );
@@ -438,8 +495,8 @@ function setForm( rec, form ) {
 			for ( let i = 0; i < 12; i ++ ) {
 
 				const a = ( i / 12 ) * Math.PI * 2;
-				const px = Math.cos( a ) * 0.55, pz = Math.sin( a ) * 0.55;
-				pts.push( px, - 0.18, pz, px, 0.18, pz );
+				const px = Math.cos( a ) * 0.55 * k, pz = Math.sin( a ) * 0.55 * k;
+				pts.push( px, - 0.18 * k, pz, px, 0.18 * k, pz );
 
 			}
 			const hull = b3.b3CreateHull( new Float32Array( pts ) );
@@ -450,14 +507,18 @@ function setForm( rec, form ) {
 		} else if ( form === 2 ) {
 
 			rec.shape = b3.b3CreateCapsuleShape( rec.body, sd, {
-				center1: { x: - 0.42, y: 0, z: 0 },
-				center2: { x: 0.42, y: 0, z: 0 },
-				radius: 0.34,
+				center1: { x: - 0.42 * k, y: 0, z: 0 },
+				center2: { x: 0.42 * k, y: 0, z: 0 },
+				radius: 0.34 * k,
 			} );
+
+		} else if ( form === 3 ) {
+
+			rec.shape = b3.b3CreateBoxShape( rec.body, sd, 0.42 * k, 0.3 * k, 0.42 * k );
 
 		} else {
 
-			rec.shape = b3.b3CreateSphereShape( rec.body, sd, { center: { x: 0, y: 0, z: 0 }, radius: CLAY_R } );
+			rec.shape = b3.b3CreateSphereShape( rec.body, sd, { center: { x: 0, y: 0, z: 0 }, radius: CLAY_R * k } );
 
 		}
 
@@ -467,7 +528,7 @@ function setForm( rec, form ) {
 
 		// 形状 API 出问题时退回圆球，别让 body 裸奔
 		console.warn( 'setForm failed, fallback to ball:', err );
-		rec.shape = b3.b3CreateSphereShape( rec.body, sd, { center: { x: 0, y: 0, z: 0 }, radius: CLAY_R } );
+		rec.shape = b3.b3CreateSphereShape( rec.body, sd, { center: { x: 0, y: 0, z: 0 }, radius: CLAY_R * k } );
 		rec.form = 0;
 
 	}
@@ -488,24 +549,32 @@ function addDentAt( rec, wp ) {
 	const lp = new THREE.Vector3( wp.x - p.x, wp.y - p.y, wp.z - p.z ).applyQuaternion( _q );
 
 	// 把落点压到该形态的表面内侧一点：负球只有咬进等值面内才有可见效果
+	const k = rec.k;
 	if ( rec.form === 1 ) {
 
 		// 圆盘：厚度方向压到皮下，径向不出边
-		lp.y = THREE.MathUtils.clamp( lp.y, - 0.18, 0.18 );
+		lp.y = THREE.MathUtils.clamp( lp.y, - 0.18 * k, 0.18 * k );
 		const r = Math.hypot( lp.x, lp.z );
-		if ( r > 0.5 ) { const s = 0.5 / r; lp.x *= s; lp.z *= s; }
+		if ( r > 0.5 * k ) { const s = 0.5 * k / r; lp.x *= s; lp.z *= s; }
 
 	} else if ( rec.form === 2 ) {
 
 		// 香肠：轴向夹在两端内，径向压到皮下
-		lp.x = THREE.MathUtils.clamp( lp.x, - 0.7, 0.7 );
+		lp.x = THREE.MathUtils.clamp( lp.x, - 0.7 * k, 0.7 * k );
 		const r = Math.hypot( lp.y, lp.z );
-		if ( r > 0.28 ) { const s = 0.28 / r; lp.y *= s; lp.z *= s; }
+		if ( r > 0.28 * k ) { const s = 0.28 * k / r; lp.y *= s; lp.z *= s; }
+
+	} else if ( rec.form === 3 ) {
+
+		// 方砖：各轴分别夹到皮下
+		lp.x = THREE.MathUtils.clamp( lp.x, - 0.38 * k, 0.38 * k );
+		lp.y = THREE.MathUtils.clamp( lp.y, - 0.22 * k, 0.22 * k );
+		lp.z = THREE.MathUtils.clamp( lp.z, - 0.38 * k, 0.38 * k );
 
 	} else {
 
 		const len = lp.length();
-		if ( len > 0.001 ) lp.multiplyScalar( Math.max( 0, len - 0.14 ) / len );
+		if ( len > 0.001 ) lp.multiplyScalar( Math.max( 0, len - 0.14 * k ) / len );
 
 	}
 	rec.dents.push( [ lp.x, lp.y, lp.z ] );
@@ -520,7 +589,7 @@ function kneadHit( rec, out ) {
 
 	const p = b3.b3Body_GetPosition( rec.body );
 	_sphere.center.set( p.x, p.y, p.z );
-	_sphere.radius = rec.form === 0 ? CLAY_R_VIS : FORMS[ rec.form ].pickR * 0.85;
+	_sphere.radius = ( rec.form === 0 ? CLAY_R_VIS : FORMS[ rec.form ].pickR * 0.85 ) * rec.k;
 	return raycaster.ray.intersectSphere( _sphere, out );
 
 }
@@ -583,7 +652,7 @@ function weld( a, b, key ) {
 				let pos = pe;
 				if ( other.form === 0 ) {
 
-					const dist = CLAY_R_VIS + DECOR[ dec.kind ].out;
+					const dist = CLAY_R_VIS * ( other.k || 1 ) + DECOR[ dec.kind ].out;
 					pos = { x: po.x + _v.x * dist, y: po.y + _v.y * dist, z: po.z + _v.z * dist };
 
 				}
@@ -722,6 +791,7 @@ function clusterOf( rec ) {
 		changed = false;
 		for ( const j of joints ) {
 
+			if ( j.chain ) continue; // 软链靠关节自己跟，拖拽时保持柔软
 			const hasA = seen.has( j.aId ), hasB = seen.has( j.bId );
 			if ( hasA === hasB ) continue;
 			const otherId = hasA ? j.bId : j.aId;
@@ -827,27 +897,30 @@ function rebuildClay() {
 
 		}
 
+		const k = rec.k;
+
 		if ( form.sub.length === 1 ) {
 
-			addFieldBall( p.x, p.y, p.z, form.sub[ 0 ].strength, rec.color );
+			addFieldBall( p.x, p.y, p.z, strengthFor( form.sub[ 0 ].r * k ), rec.color );
 
 		} else {
 
-			// 子球局部偏移跟随刚体旋转
+			// 子球局部偏移跟随刚体旋转，尺寸按件缩放
 			for ( const sub of form.sub ) {
 
-				_v.set( sub.o[ 0 ], sub.o[ 1 ], sub.o[ 2 ] ).applyQuaternion( _q );
-				addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, sub.strength, rec.color );
+				_v.set( sub.o[ 0 ] * k, sub.o[ 1 ] * k, sub.o[ 2 ] * k ).applyQuaternion( _q );
+				addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, strengthFor( sub.r * k ), rec.color );
 
 			}
 
 		}
 
-		// 凹坑：负强度 metaball 做减法雕刻
+		// 凹坑：负强度 metaball 做减法雕刻（坑的局部坐标已按 k 存储）
+		const dentS = strengthFor( DENT_R * k );
 		for ( const d of rec.dents ) {
 
 			_v.set( d[ 0 ], d[ 1 ], d[ 2 ] ).applyQuaternion( _q );
-			addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, - dentStrength, rec.color );
+			addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, - dentS, rec.color );
 
 		}
 
@@ -970,10 +1043,16 @@ function onPointerMove( e ) {
 		if ( rayPlaneY( LIFT_Y, _v ) ) {
 
 			clampPlay( _v, 0.4 );
+			session.pending = false;
+			if ( session.kind === 'chain' ) {
+
+				createChain( _v.x, _v.z, selected );
+				return;
+
+			}
 			const rec = session.kind === 'clay'
 				? createClay( _v.x, LIFT_Y, _v.z, session.colorIndex )
 				: createDecor( session.kind, _v.x, LIFT_Y, _v.z );
-			session.pending = false;
 			if ( rec ) {
 
 				session.type = 'ball';
@@ -1052,6 +1131,7 @@ function onPointerUp( e ) {
 		// 点一下调色盘：随机丢一颗进来
 		const rx = ( Math.random() - 0.5 ) * 1.6, rz = ( Math.random() - 0.5 ) * 1.6;
 		if ( session.kind === 'clay' ) createClay( rx, 3.4, rz, session.colorIndex );
+		else if ( session.kind === 'chain' ) createChain( rx, rz, selected );
 		else createDecor( session.kind, rx, 3.4, rz );
 
 	}
@@ -1221,7 +1301,23 @@ function setupUI() {
 
 	selectColor( 0 );
 
-	for ( const [ id, kind ] of [ [ 'eyeBtn', 'eye' ], [ 'mouthBtn', 'mouth' ], [ 'hatBtn', 'hat' ] ] ) {
+	// ● 大小切换：影响之后新加的黏土（和小蛇）
+	const sizeBtn = document.getElementById( 'sizeBtn' );
+	const applySizeBtn = () => { sizeBtn.style.fontSize = [ '13px', '19px', '27px' ][ sizeIndex ]; };
+	applySizeBtn();
+	sizeBtn.addEventListener( 'pointerdown', ( e ) => {
+
+		reclaimStalePointer( e );
+		if ( session ) return;
+		e.preventDefault();
+		ensureAudio();
+		sizeIndex = ( sizeIndex + 1 ) % SIZES.length;
+		applySizeBtn();
+		boing();
+
+	} );
+
+	for ( const [ id, kind ] of [ [ 'chainBtn', 'chain' ], [ 'eyeBtn', 'eye' ], [ 'mouthBtn', 'mouth' ], [ 'hatBtn', 'hat' ] ] ) {
 
 		document.getElementById( id ).addEventListener( 'pointerdown', ( e ) => {
 
@@ -1319,10 +1415,36 @@ function setupUI() {
 
 // ---------- 🎬 表演模式：游戏当面捏一遍食谱，带解说 ----------
 
+// 表演的等待以物理步数为时钟：后台页签定时器会被浏览器钳流，
+// 而步数时钟让表演跟着模拟一起暂停/恢复
+const demoWaiters = [];
+
+function pumpDemoWaiters() {
+
+	for ( let i = demoWaiters.length - 1; i >= 0; i -- ) {
+
+		const w = demoWaiters[ i ];
+		if ( w.token !== demoRun ) {
+
+			demoWaiters.splice( i, 1 );
+			w.reject( new Error( 'demo-stopped' ) );
+
+		} else if ( stepCount >= w.target ) {
+
+			demoWaiters.splice( i, 1 );
+			w.resolve();
+
+		}
+
+	}
+
+}
+
 function stopDemo() {
 
 	if ( ! demoRun ) return;
 	demoRun = null;
+	pumpDemoWaiters();
 	resetHint();
 
 }
@@ -1414,6 +1536,52 @@ const DEMO_RECIPES = [
 		await S.wait( 1300 );
 
 	} },
+	{ name: '小蛇', run: async ( S ) => {
+
+		S.say( '🐍 放一条软软的小蛇' );
+		const segs = S.chain( 0, 0.3, 3 );
+		await S.wait( 1800 );
+		if ( segs.length ) {
+
+			S.say( '头上贴眼睛' );
+			const p = S.pos( segs[ 0 ] );
+			if ( p ) {
+
+				S.eye( p.x - 0.18, p.z + 0.22 ); await S.wait( 800 );
+				S.eye( p.x + 0.14, p.z + 0.24 );
+
+			}
+
+		}
+		await S.wait( 1500 );
+
+	} },
+	{ name: '小房子', run: async ( S ) => {
+
+		S.say( '摆四颗球' );
+		const bricks = [];
+		for ( const [ dx, dz ] of [ [ - 0.55, - 0.55 ], [ 0.55, - 0.55 ], [ - 0.55, 0.55 ], [ 0.55, 0.55 ] ] ) {
+
+			bricks.push( S.clay( dx, dz, 1 ) );
+			await S.wait( 800 );
+
+		}
+		S.say( '每颗按住变三下：变成方砖！' );
+		for ( const b of bricks ) {
+
+			S.morph( b ); await S.wait( 260 );
+			S.morph( b ); await S.wait( 260 );
+			S.morph( b ); await S.wait( 700 );
+
+		}
+		S.say( '顶上盖屋顶' );
+		const roof = S.clay( 0, 0, 0 ); await S.wait( 1100 );
+		S.morph( roof ); await S.wait( 1100 );
+		S.say( '再加个尖顶烟囱～' );
+		S.decor( 'hat', 0, - 0.05 );
+		await S.wait( 1600 );
+
+	} },
 ];
 
 async function startDemo() {
@@ -1427,14 +1595,16 @@ async function startDemo() {
 	demoRun = token;
 
 	// 中途被打断（用户碰画布/按钮）时 wait 会 reject，直接静默收场
+	// 演示件一律用中号（kOverride=1），不受 ● 大小档影响，保证坐标稳定
 	const S = {
 		wait: ( ms ) => new Promise( ( resolve, reject ) => {
 
-			setTimeout( () => ( demoRun === token ? resolve() : reject( new Error( 'demo-stopped' ) ) ), ms );
+			demoWaiters.push( { token, target: stepCount + Math.max( 1, Math.round( ms * 0.06 ) ), resolve, reject } );
 
 		} ),
 		say: ( t ) => setHint( '🎬 ' + recipe.name + '：' + t ),
-		clay: ( x, z, c ) => createClay( x, 3, z, c ),
+		clay: ( x, z, c ) => createClay( x, 3, z, c, null, 1 ),
+		chain: ( x, z, c ) => createChain( x, z, c, 1 ),
 		decor: ( kind, x, z ) => createDecor( kind, x, 3, z ),
 		eye: ( x, z ) => createDecor( 'eye', x, 3, z ),
 		morph: ( rec ) => { if ( rec && rec.alive ) setForm( rec, ( rec.form + 1 ) % FORMS.length ); },
@@ -1597,6 +1767,7 @@ function animate() {
 
 	}
 
+	pumpDemoWaiters();
 	syncEyes();
 	rebuildClay();
 	renderer.render( scene, camera );
@@ -1610,13 +1781,16 @@ window.__clay = {
 		balls: balls.map( ( r ) => {
 
 			const p = b3.b3Body_GetPosition( r.body );
-			return { id: r.id, kind: r.kind, form: r.form, dents: r.dents ? r.dents.length : 0, x: + p.x.toFixed( 2 ), y: + p.y.toFixed( 2 ), z: + p.z.toFixed( 2 ), awake: b3.b3Body_IsAwake( r.body ) };
+			return { id: r.id, kind: r.kind, form: r.form, k: r.k, dents: r.dents ? r.dents.length : 0, x: + p.x.toFixed( 2 ), y: + p.y.toFixed( 2 ), z: + p.z.toFixed( 2 ), awake: b3.b3Body_IsAwake( r.body ) };
 
 		} ),
 		joints: joints.length,
 		sticky: stickyEnabled,
 	} ),
 	spawn: ( x, z, c ) => createClay( x, 3, z, c === undefined ? selected : c ),
+	chain: ( x, z, c ) => createChain( x, z, c === undefined ? selected : c ),
+	size: ( i ) => { sizeIndex = Math.max( 0, Math.min( SIZES.length - 1, i ) ); return SIZES[ sizeIndex ]; },
+	demo: ( i ) => { if ( i !== undefined ) demoIndex = i; startDemo(); },
 	eye: ( x, z ) => createDecor( 'eye', x, 3, z ),
 	decor: ( kind, x, z ) => createDecor( kind, x, 3, z ),
 	morph: ( id ) => {
@@ -1658,6 +1832,7 @@ window.__clay = {
 			if ( stepCount % 30 === 0 ) rescuePass();
 
 		}
+		pumpDemoWaiters();
 		syncEyes();
 		markDirty();
 		rebuildClay();
