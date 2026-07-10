@@ -21,7 +21,13 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **● size** — cycle small / medium / large for new clay: proportions make creatures.
 - **🐍 snake** — a soft chain of linked segments; lift one end and the rest dangles.
 - **🤏 knead mode** — toggle it, then press and drag on clay to poke dents and carve
-  grooves; going over the same spot again digs deeper. Toggle again to go back to dragging.
+  grooves; going over the same spot again digs deeper. A quick press-and-pull off the
+  surface raises a bump. Toggle again to go back to dragging.
+- **Pinch while dragging** — hold a piece with one finger, put a second finger down:
+  spread/close to resize it, twist to rotate. It re-sticks to its neighbours on release.
+- **Autosave & share** — your board saves automatically, and **the page URL is the share
+  link**: copy it and the creation opens on any device. (Opening someone else's link
+  won't overwrite your own save until you start editing.)
 - **Tap a piece** — it hops. **Double-tap** — it pops off whatever it was stuck to.
 - **👀 👄 🎩** — eyes, a smile, a party hat; they stick to clay facing outward.
 - **🧹** — hold to clear the board.
@@ -60,7 +66,7 @@ open http://localhost:8917
 ```
 
 A `window.__clay` debug handle is exposed in the console: `state()`, `spawn(x, z, color)`,
-`eye(x, z)`, `step(n)`, `clear()`.
+`eye(x, z)`, `step(n)`, `clear()`, `save()`, `load(json)`, `demo(i)`.
 
 ## How it works
 
