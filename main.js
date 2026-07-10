@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Box3D from 'box3d.js/inline';
 
 // ---------- 常量 ----------
@@ -8,7 +9,7 @@ const COARSE = matchMedia( '(pointer: coarse)' ).matches;
 
 const BOARD_HALF = 2.6;          // 黏土盘半径（物理围墙内侧）
 const FIELD_S = 3.4;             // metaball 场半尺寸：世界 x/z ∈ [-S,S]，y ∈ [0,2S]
-const RES = COARSE ? 36 : 44;    // marching cubes 分辨率（触屏设备多为移动端，降一档）
+const RES = COARSE ? 36 : 52;    // marching cubes 分辨率（触屏设备多为移动端，降一档）
 const SUBTRACT = 12;             // metaball 场衰减系数（官方示例同款）
 const CLAY_R = 0.5;              // 黏土球物理半径
 const CLAY_R_VIS = 0.62;         // 视觉半径略大于物理半径，贴住时看起来融为一体
@@ -61,7 +62,7 @@ const CHAIN_K = 0.68;            // 链节相对当前档的大小
 const DECOR = {
 	eye: { r: EYE_R, out: EYE_R * 0.5 },
 	mouth: { r: 0.12, out: 0.04 },
-	hat: { r: 0.22, out: 0.06 },
+	hat: { r: 0.12, out: 0.02 },
 };
 
 // ---------- 模块状态 ----------
@@ -111,6 +112,15 @@ const UP = new THREE.Vector3( 0, 1, 0 );
 // 复用对象，避免每帧分配
 const _plane = new THREE.Plane();
 const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+
+// 出生弹跳缓动（略微过冲）
+function easeOutBack( t ) {
+
+	const c1 = 1.70158, c3 = c1 + 1;
+	return 1 + c3 * Math.pow( t - 1, 3 ) + c1 * Math.pow( t - 1, 2 );
+
+}
 const _sphere = new THREE.Sphere();
 const _q = new THREE.Quaternion();
 
@@ -136,13 +146,22 @@ async function init() {
 	scene.background = new THREE.Color( BG );
 	scene.fog = new THREE.Fog( BG, 14, 26 );
 
+	// 环境光照（PMREM）：材质的“润”主要来自这里；强度压低，别冲掉暖色
+	{
+		const pmrem = new THREE.PMREMGenerator( renderer );
+		const room = new RoomEnvironment();
+		scene.environment = pmrem.fromScene( room, 0.04 ).texture;
+		scene.environmentIntensity = 0.3;
+		pmrem.dispose();
+	}
+
 	camera = new THREE.PerspectiveCamera( 40, innerWidth / innerHeight, 0.1, 60 );
 	frameCamera();
 
-	// 灯光：柔和天光 + 一盏投影主灯，黏土要的是软阴影
-	scene.add( new THREE.HemisphereLight( 0xfff6e8, 0xc9b391, 1.1 ) );
+	// 灯光：环境贴图打底，天光减弱，一盏投影主灯（约 4:1 光比），黏土要的是软阴影
+	scene.add( new THREE.HemisphereLight( 0xfff6e8, 0xc9b391, 0.75 ) );
 
-	const sun = new THREE.DirectionalLight( 0xffffff, 2.2 );
+	const sun = new THREE.DirectionalLight( 0xfff2e0, 2.0 );
 	sun.position.set( 4, 9, 5 );
 	sun.castShadow = true;
 	const shadowRes = COARSE ? 1024 : 2048;
@@ -156,10 +175,26 @@ async function init() {
 	sun.shadow.bias = - 0.0005;
 	scene.add( sun );
 
-	// 黏土盘（视觉）
+	// 黏土盘（视觉）：径向渐变贴图，中心亮四周暗，托出主体
+	const boardTex = ( () => {
+
+		const cv = document.createElement( 'canvas' );
+		cv.width = cv.height = 256;
+		const g = cv.getContext( '2d' );
+		const grad = g.createRadialGradient( 128, 128, 30, 128, 128, 128 );
+		grad.addColorStop( 0, '#eedbbc' );
+		grad.addColorStop( 0.72, '#e5ceac' );
+		grad.addColorStop( 1, '#cfb48d' );
+		g.fillStyle = grad;
+		g.fillRect( 0, 0, 256, 256 );
+		const tex = new THREE.CanvasTexture( cv );
+		tex.colorSpace = THREE.SRGBColorSpace;
+		return tex;
+
+	} )();
 	const board = new THREE.Mesh(
 		new THREE.CylinderGeometry( BOARD_HALF + 1.2, BOARD_HALF + 1.5, 0.5, 64 ),
-		new THREE.MeshStandardMaterial( { color: 0xead9bd, roughness: 0.95 } )
+		new THREE.MeshStandardMaterial( { map: boardTex, roughness: 0.92 } )
 	);
 	board.position.y = - 0.25;
 	board.receiveShadow = true;
@@ -176,8 +211,15 @@ async function init() {
 	rim.receiveShadow = true;
 	scene.add( rim );
 
-	// metaball 黏土：逐球颜色 + 高粗糙度 = 橡皮泥质感
-	const clayMaterial = new THREE.MeshStandardMaterial( { roughness: 0.7, metalness: 0, vertexColors: true } );
+	// metaball 黏土：逐球颜色 + 轻微清漆层 = 橡皮泥微微发润的质感
+	const clayMaterial = new THREE.MeshPhysicalMaterial( {
+		roughness: 0.58,
+		metalness: 0,
+		clearcoat: 0.15,
+		clearcoatRoughness: 0.5,
+		envMapIntensity: 0.5,
+		vertexColors: true,
+	} );
 	effect = new MarchingCubes( RES, clayMaterial, false, true, 100000 );
 	effect.position.set( 0, FIELD_S + FIELD_Y0, 0 );
 	effect.scale.set( FIELD_S, FIELD_S, FIELD_S );
@@ -190,8 +232,8 @@ async function init() {
 	{
 		const eyeWhiteGeo = new THREE.SphereGeometry( EYE_R, 24, 16 );
 		const eyePupilGeo = new THREE.SphereGeometry( EYE_R * 0.5, 16, 12 );
-		const eyeWhiteMat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.35 } );
-		const eyePupilMat = new THREE.MeshStandardMaterial( { color: 0x2b2420, roughness: 0.3 } );
+		const eyeWhiteMat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.15 } );
+		const eyePupilMat = new THREE.MeshStandardMaterial( { color: 0x2b2420, roughness: 0.1 } );
 
 		decorBuilders.eye = () => {
 
@@ -224,18 +266,20 @@ async function init() {
 		const brimGeo = new THREE.TorusGeometry( 0.29, 0.045, 8, 24 );
 		const pomGeo = new THREE.SphereGeometry( 0.08, 12, 8 );
 		const hatMat = new THREE.MeshStandardMaterial( { color: 0xe0584b, roughness: 0.7 } );
-		const hatTrimMat = new THREE.MeshStandardMaterial( { color: 0xfff2dd, roughness: 0.7 } );
+		const hatTrimMat = new THREE.MeshStandardMaterial( { color: 0xf0b64e, roughness: 0.55 } );
 
 		decorBuilders.hat = () => {
 
 			const g = new THREE.Group();
+			// 整体沿锥轴下沉 0.12：帽檐视觉上嵌进头顶，物理仍无穿透
 			const cone = new THREE.Mesh( coneGeo, hatMat );
 			cone.rotation.x = Math.PI / 2; // 锥轴从 +Y 转到 +Z
-			cone.position.z = 0.25;
+			cone.position.z = 0.13;
 			cone.castShadow = true;
 			const brim = new THREE.Mesh( brimGeo, hatTrimMat );
+			brim.position.z = - 0.12;
 			const pom = new THREE.Mesh( pomGeo, hatTrimMat );
-			pom.position.z = 0.52;
+			pom.position.z = 0.4;
 			g.add( cone, brim, pom );
 			return g;
 
@@ -402,6 +446,9 @@ function createClay( x, y, z, colorIndex, vel, kOverride ) {
 		k,
 		frozen: false,
 		slowTicks: 0,
+		squash: 0,
+		prevVy: 0,
+		bornAt: performance.now(),
 		dents: [],
 		r: CLAY_R * k,
 		color: new THREE.Color( CLAY_COLORS[ colorIndex ] ),
@@ -449,7 +496,7 @@ function createDecor( kind, x, y, z ) {
 	const mesh = decorBuilders[ kind ]();
 	scene.add( mesh );
 
-	const rec = { id: nextId ++, kind, body, shape, r: spec.r, color: null, mesh, alive: true, frozen: false, slowTicks: 0 };
+	const rec = { id: nextId ++, kind, body, shape, r: spec.r, color: null, mesh, alive: true, frozen: false, slowTicks: 0, bornAt: performance.now(), popAt: 0, nextBlink: performance.now() + 1200 + Math.random() * 3000, blinkUntil: 0 };
 	balls.push( rec );
 	markDirty();
 	plop();
@@ -918,7 +965,15 @@ function weld( a, b, key ) {
 
 	}
 
-	if ( weldRaw( a, b, false ) ) squish();
+	if ( weldRaw( a, b, false ) ) {
+
+		if ( a.kind === 'clay' ) a.squash = Math.max( a.squash, 0.5 );
+		if ( b.kind === 'clay' ) b.squash = Math.max( b.squash, 0.5 );
+		if ( dec ) dec.popAt = performance.now();
+		markDirty();
+		squish();
+
+	}
 
 }
 
@@ -1190,10 +1245,25 @@ function rebuildClay() {
 	}
 
 	effect.reset();
+	const nowMs = performance.now();
 	for ( const rec of balls ) {
 
 		if ( rec.kind !== 'clay' ) continue;
 		const p = b3.b3Body_GetPosition( rec.body );
+
+		// 落地/撞击 → 挤压（竖直速度骤减触发），随后指数回弹
+		const vel = b3.b3Body_GetLinearVelocity( rec.body );
+		if ( rec.prevVy < - 2.5 && vel.y > rec.prevVy + 2 ) rec.squash = Math.min( 1, - rec.prevVy / 9 );
+		rec.prevVy = vel.y;
+		if ( rec.squash > 0.02 ) { rec.squash *= 0.88; markDirty(); } else rec.squash = 0;
+		const squashDrop = rec.r * 0.38 * rec.squash;
+		const squashBoost = 1 + 0.5 * rec.squash;
+
+		// 出生弹跳：强度从 0 长到 1（带一点过冲）
+		const age = ( nowMs - rec.bornAt ) / 240;
+		const grow = age >= 1 ? 1 : easeOutBack( Math.max( 0.03, age ) );
+		const gain = squashBoost * grow;
+
 		const form = FORMS[ rec.form ];
 		const rotated = form.sub.length > 1 || rec.dents.length > 0;
 
@@ -1208,7 +1278,7 @@ function rebuildClay() {
 
 		if ( form.sub.length === 1 ) {
 
-			addFieldBall( p.x, p.y, p.z, strengthFor( form.sub[ 0 ].r * k ), rec.color );
+			addFieldBall( p.x, p.y - squashDrop, p.z, strengthFor( form.sub[ 0 ].r * k ) * gain, rec.color );
 
 		} else {
 
@@ -1216,7 +1286,7 @@ function rebuildClay() {
 			for ( const sub of form.sub ) {
 
 				_v.set( sub.o[ 0 ] * k, sub.o[ 1 ] * k, sub.o[ 2 ] * k ).applyQuaternion( _q );
-				addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, strengthFor( sub.r * k ), rec.color );
+				addFieldBall( p.x + _v.x, p.y + _v.y - squashDrop, p.z + _v.z, strengthFor( sub.r * k ) * gain, rec.color );
 
 			}
 
@@ -1240,6 +1310,7 @@ function rebuildClay() {
 
 function syncEyes() {
 
+	const nowMs = performance.now();
 	for ( const rec of balls ) {
 
 		if ( ! rec.mesh ) continue;
@@ -1247,6 +1318,37 @@ function syncEyes() {
 		const q = b3.b3Body_GetRotation( rec.body );
 		rec.mesh.position.set( p.x, p.y, p.z );
 		rec.mesh.quaternion.set( q.v.x, q.v.y, q.v.z, q.s );
+
+		// 出生弹入 + 贴合时弹一下
+		const age = ( nowMs - rec.bornAt ) / 240;
+		let s = age >= 1 ? 1 : easeOutBack( Math.max( 0.03, age ) );
+		if ( rec.popAt && nowMs - rec.popAt < 260 ) s *= 1 + 0.3 * Math.sin( ( nowMs - rec.popAt ) / 260 * Math.PI );
+		rec.mesh.scale.setScalar( s );
+
+		if ( rec.kind === 'eye' ) {
+
+			const white = rec.mesh.children[ 0 ], pupil = rec.mesh.children[ 1 ];
+
+			// 随机眨眼
+			if ( nowMs >= rec.nextBlink ) {
+
+				rec.blinkUntil = nowMs + 130;
+				rec.nextBlink = nowMs + 1800 + Math.random() * 3500;
+
+			}
+			const blinking = nowMs < rec.blinkUntil;
+			white.scale.y = blinking ? 0.18 : 1;
+			pupil.visible = ! blinking;
+
+			// 瞳孔追视：看手里拖着的东西，没有就看镜头
+			rec.mesh.updateMatrixWorld();
+			_v2.copy( drag && drag.rec !== rec ? drag.target : camera.position );
+			rec.mesh.worldToLocal( _v2 );
+			if ( _v2.z < 0.3 ) _v2.z = 0.3;
+			_v2.normalize();
+			pupil.position.set( _v2.x * EYE_R * 0.5, _v2.y * EYE_R * 0.5, Math.max( 0.5, _v2.z ) * EYE_R * 0.72 );
+
+		}
 
 	}
 
@@ -2209,9 +2311,36 @@ function tone( type, f0, f1, dur, gain ) {
 
 }
 
+function noiseBurst( f0, f1, dur, gain ) {
+
+	if ( ! actx ) return;
+	if ( ! noiseBuffer ) {
+
+		noiseBuffer = actx.createBuffer( 1, actx.sampleRate * 0.2, actx.sampleRate );
+		const data = noiseBuffer.getChannelData( 0 );
+		for ( let i = 0; i < data.length; i ++ ) data[ i ] = Math.random() * 2 - 1;
+
+	}
+	const t = actx.currentTime;
+	const srcN = actx.createBufferSource();
+	srcN.buffer = noiseBuffer;
+	const filter = actx.createBiquadFilter();
+	filter.type = 'lowpass';
+	filter.frequency.setValueAtTime( f0, t );
+	filter.frequency.exponentialRampToValueAtTime( f1, t + dur );
+	const g = actx.createGain();
+	g.gain.setValueAtTime( gain, t );
+	g.gain.exponentialRampToValueAtTime( 0.001, t + dur );
+	srcN.connect( filter ).connect( g ).connect( actx.destination );
+	srcN.start( t );
+	srcN.stop( t + dur + 0.02 );
+
+}
+
 function plop() {
 
 	tone( 'sine', 420, 130, 0.12, 0.25 );
+	noiseBurst( 600, 180, 0.09, 0.1 ); // 一点“扑”的厚度
 
 }
 
@@ -2233,28 +2362,7 @@ function squish() {
 	const now = performance.now();
 	if ( now - lastSquishAt < 80 ) return;
 	lastSquishAt = now;
-
-	if ( ! noiseBuffer ) {
-
-		noiseBuffer = actx.createBuffer( 1, actx.sampleRate * 0.2, actx.sampleRate );
-		const data = noiseBuffer.getChannelData( 0 );
-		for ( let i = 0; i < data.length; i ++ ) data[ i ] = Math.random() * 2 - 1;
-
-	}
-
-	const t = actx.currentTime;
-	const src = actx.createBufferSource();
-	src.buffer = noiseBuffer;
-	const filter = actx.createBiquadFilter();
-	filter.type = 'lowpass';
-	filter.frequency.setValueAtTime( 900, t );
-	filter.frequency.exponentialRampToValueAtTime( 150, t + 0.18 );
-	const g = actx.createGain();
-	g.gain.setValueAtTime( 0.18, t );
-	g.gain.exponentialRampToValueAtTime( 0.001, t + 0.18 );
-	src.connect( filter ).connect( g ).connect( actx.destination );
-	src.start( t );
-	src.stop( t + 0.2 );
+	noiseBurst( 900, 150, 0.18, 0.18 );
 
 }
 
