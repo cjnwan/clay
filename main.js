@@ -942,6 +942,14 @@ function onPointerMove( e ) {
 	// 捏捏：沿划动路径隔一小段捏一个坑
 	if ( session.type === 'knead' ) {
 
+		// 拖出很远说明是想搬家，提示先退出捏捏模式
+		if ( ! session.warned && Math.hypot( e.clientX - session.x0, e.clientY - session.y0 ) > 90 ) {
+
+			session.warned = true;
+			setHint( '想搬家？先点 🤏 收手，再拖就能移动啦' );
+
+		}
+
 		if ( session.rec.alive && kneadHit( session.rec, _v ) ) {
 
 			if ( ! session.lastDent || _v.distanceTo( session.lastDent ) > DENT_STEP ) {
@@ -1084,6 +1092,21 @@ function endSession() {
 
 }
 
+function cancelSession() {
+
+	drag = null;
+	endSession();
+
+}
+
+// pointerup 可能被系统手势/来电吞掉，残留的会话会挡住之后所有触摸。
+// 新触摸 isPrimary=true 意味着旧手指必然已离屏（真正的多指时第二指是 false），可以安全回收。
+function reclaimStalePointer( e ) {
+
+	if ( session && e.isPrimary ) cancelSession();
+
+}
+
 function beginSession( s ) {
 
 	session = s;
@@ -1099,8 +1122,17 @@ function setupPointer() {
 
 	canvas.addEventListener( 'contextmenu', ( e ) => e.preventDefault() );
 
+	// 切后台 / 失焦时正在进行的会话一并取消，防止残留
+	window.addEventListener( 'blur', cancelSession );
+	document.addEventListener( 'visibilitychange', () => {
+
+		if ( document.hidden ) cancelSession();
+
+	} );
+
 	canvas.addEventListener( 'pointerdown', ( e ) => {
 
+		reclaimStalePointer( e );
 		if ( session ) return;
 		ensureAudio();
 		stopDemo();
@@ -1174,6 +1206,7 @@ function setupUI() {
 		btn.style.background = '#' + c.toString( 16 ).padStart( 6, '0' );
 		btn.addEventListener( 'pointerdown', ( e ) => {
 
+			reclaimStalePointer( e );
 			if ( session ) return;
 			e.preventDefault();
 			ensureAudio();
@@ -1192,6 +1225,7 @@ function setupUI() {
 
 		document.getElementById( id ).addEventListener( 'pointerdown', ( e ) => {
 
+			reclaimStalePointer( e );
 			if ( session ) return;
 			e.preventDefault();
 			ensureAudio();
@@ -1209,6 +1243,7 @@ function setupUI() {
 
 	kneadBtn.addEventListener( 'pointerdown', ( e ) => {
 
+		reclaimStalePointer( e );
 		if ( session ) return;
 		e.preventDefault();
 		ensureAudio();
@@ -1222,6 +1257,7 @@ function setupUI() {
 	// 🎬 看表演：游戏自己捏一个造型给你看
 	document.getElementById( 'demoBtn' ).addEventListener( 'pointerdown', ( e ) => {
 
+		reclaimStalePointer( e );
 		if ( session ) return;
 		e.preventDefault();
 		ensureAudio();
@@ -1257,6 +1293,7 @@ function setupUI() {
 
 	clearBtn.addEventListener( 'pointerdown', ( e ) => {
 
+		reclaimStalePointer( e );
 		if ( session ) return;
 		e.preventDefault();
 		ensureAudio();
