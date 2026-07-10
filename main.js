@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Box3D from 'box3d.js/inline';
+import { BODY_TEMPLATES, bakeBodyMesh } from './workshop.js';
 
 // ---------- 常量 ----------
 
@@ -3158,6 +3159,23 @@ window.__clay = {
 	dump: () => serializeScene(),
 	raw: () => ( { b3, world, effect, balls, FORMS } ),
 	dragInfo: () => ( drag ? { id: drag.rec.id, target: drag.target.toArray(), quat: drag.targetQuat.toArray() } : null ),
+	// 工坊 Stage 1 验证：烘焙身体模板并摆到盘中央看效果/耗时
+	bake: ( i = 0, res = 88 ) => {
+
+		if ( window.__bakePreview ) scene.remove( window.__bakePreview );
+		const tpl = BODY_TEMPLATES[ i % BODY_TEMPLATES.length ];
+		const mat = new THREE.MeshPhysicalMaterial( {
+			color: CLAY_COLORS[ ( i + 9 ) % CLAY_COLORS.length ],
+			roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
+		} );
+		const { mesh, ms, tris } = bakeBodyMesh( tpl, mat, res );
+		mesh.position.set( 0, 0.02, 0 );
+		scene.add( mesh );
+		window.__bakePreview = mesh;
+		renderer.render( scene, camera );
+		return { name: tpl.name, res, ms: Math.round( ms * 10 ) / 10, tris };
+
+	},
 	project: ( x, y, z ) => {
 
 		const v = new THREE.Vector3( x, y, z ).project( camera );
