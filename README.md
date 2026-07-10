@@ -14,6 +14,8 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 ## Play
 
 - **Tap a color** — a ball of clay plops in. Tap the board to place one exactly there.
+  Twelve colors including white, black, brown, pink, grey and cream — enough for the
+  chibi figure-in-a-costume look (dark hood ball + face ball welded in front).
 - **Drag from the palette** — carry a fresh ball anywhere.
 - **Drag clay** — the held piece leaves physics and tracks your finger exactly
   (kinematic carry): it won't snag on things in the way, and it only sticks where you
@@ -33,8 +35,10 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **✂️ scissors** — tap a piece to cut it in two (each 80% size, same form and color);
   snip a snake segment to sever the chain. Too-small pieces refuse the cut.
 - **🖌 paint** — pick a color, then tap or stroke on clay to smear it on like pressed
-  bits of colored clay: blush cheeks, spots, frosting. Soft watercolor blends, saved
+  bits of colored clay: blush cheeks, spots, frosting. Dab size follows the ● size
+  toggle (small dot / patch / big face-sized patch). Soft watercolor blends, saved
   and shared with the creation.
+- **🎀 bow** — a bow-tie decoration alongside eyes, mouth and hat.
 - **Pinch while dragging** — hold a piece with one finger, put a second finger down:
   spread/close to resize it, twist to rotate. It re-sticks to its neighbours on release.
 - **🤸 flip** — while holding a piece, tap 🤸 with your other hand: it tumbles 90° about

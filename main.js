@@ -20,7 +20,10 @@ const STEP = 1 / 60;
 const LIFT_Y = 1.15;             // 拖拽时把球提到的高度
 const STICK_SPEED = 2.5;         // 黏土互黏的相对速度上限
 const DECOR_STICK_SPEED = 7;     // 贴件更黏：从空中掉到黏土上也直接粘住
-const CLAY_COLORS = [ 0xe0584b, 0xf2a34d, 0xf6d155, 0x7dbb5f, 0x53a7dd, 0xa06bc9 ];
+const CLAY_COLORS = [
+	0xe0584b, 0xf2a34d, 0xf6d155, 0x7dbb5f, 0x53a7dd, 0xa06bc9, // 红橙黄绿蓝紫
+	0xf7f3ec, 0x3a3430, 0x9c6b4a, 0xf2a7c4, 0xa9a9ae, 0xf2e0c2, // 白黑棕粉灰奶油
+];
 const DAB_COLORS = CLAY_COLORS.map( ( c ) => new THREE.Color( c ) );
 const BG = 0xefe0c8;
 const FIELD_Y0 = - 0.2;          // 场底比桌面低一点，黏土底部才不会被切出开口，还有“压扁”效果
@@ -64,6 +67,7 @@ const DECOR = {
 	eye: { r: EYE_R, out: EYE_R * 0.5 },
 	mouth: { r: 0.12, out: 0.04 },
 	hat: { r: 0.12, out: 0.02 },
+	bow: { r: 0.12, out: 0 },
 };
 
 // ---------- 模块状态 ----------
@@ -272,6 +276,30 @@ async function init() {
 		const pomGeo = new THREE.SphereGeometry( 0.08, 12, 8 );
 		const hatMat = new THREE.MeshStandardMaterial( { color: 0xe0584b, roughness: 0.7 } );
 		const hatTrimMat = new THREE.MeshStandardMaterial( { color: 0xf0b64e, roughness: 0.55 } );
+
+		const bowWingGeo = new THREE.ConeGeometry( 0.13, 0.22, 12 );
+		const bowKnotGeo = new THREE.SphereGeometry( 0.07, 12, 8 );
+		const bowMat = new THREE.MeshStandardMaterial( { color: 0xc9364a, roughness: 0.6 } );
+
+		decorBuilders.bow = () => {
+
+			const g = new THREE.Group();
+			const l = new THREE.Mesh( bowWingGeo, bowMat );
+			l.rotation.z = Math.PI / 2;   // 锥尖指向 -x → 左翼
+			l.position.x = - 0.14;
+			l.scale.z = 0.55;
+			l.castShadow = true;
+			const r = new THREE.Mesh( bowWingGeo, bowMat );
+			r.rotation.z = - Math.PI / 2;
+			r.position.x = 0.14;
+			r.scale.z = 0.55;
+			r.castShadow = true;
+			const knot = new THREE.Mesh( bowKnotGeo, bowMat );
+			knot.position.z = 0.03;
+			g.add( l, r, knot );
+			return g;
+
+		};
 
 		decorBuilders.hat = () => {
 
@@ -681,12 +709,14 @@ function addBumpAt( rec, wp ) {
 }
 
 // 🖌 上色：像按上一小块彩泥——正强度小 metaball 抹在表面，颜色可与本体不同
-function addDabAt( rec, wp, ci ) {
+const DAB_R = [ 0.1, 0.15, 0.26 ]; // 色块三档：点 / 块 / 大补丁（脸、肚皮）
+
+function addDabAt( rec, wp, ci, sz ) {
 
 	const lp = clampToShell( rec, worldToLocal( rec, wp, new THREE.Vector3() ) );
 	const len = lp.length();
 	if ( len > 0.001 ) lp.multiplyScalar( ( len + 0.1 * rec.k ) / len );
-	rec.dents.push( [ lp.x, lp.y, lp.z, 2, ci ] );
+	rec.dents.push( [ lp.x, lp.y, lp.z, 2, ci, sz === undefined ? 1 : sz ] );
 	if ( rec.dents.length > MAX_DENTS ) rec.dents.shift();
 	markDirty();
 	dabTick();
@@ -810,7 +840,7 @@ function serializeScene() {
 				o.f = THREE.MathUtils.clamp( r.form | 0, 0, FORMS.length - 1 );
 				o.k = r3( r.k );
 				o.c = Math.max( 0, CLAY_COLORS.indexOf( r.color.getHex() ) );
-				if ( r.dents.length ) o.d = r.dents.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 2 ? 2 : ( d[ 3 ] === 1 ? 1 : - 1 ), d[ 4 ] | 0 ] );
+				if ( r.dents.length ) o.d = r.dents.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 2 ? 2 : ( d[ 3 ] === 1 ? 1 : - 1 ), d[ 4 ] | 0, d[ 5 ] === undefined ? 1 : d[ 5 ] | 0 ] );
 
 			}
 			return o;
@@ -864,7 +894,8 @@ function loadScene( data ) {
 					rec.dents = o.d.filter( Array.isArray ).slice( 0, MAX_DENTS )
 						.map( ( d ) => [ num( d[ 0 ], 0 ), num( d[ 1 ], 0 ), num( d[ 2 ], 0 ),
 							( d[ 3 ] === 1 || d[ 3 ] === 2 ) ? d[ 3 ] : - 1,
-							THREE.MathUtils.clamp( num( d[ 4 ], 0 ) | 0, 0, CLAY_COLORS.length - 1 ) ] );
+							THREE.MathUtils.clamp( num( d[ 4 ], 0 ) | 0, 0, CLAY_COLORS.length - 1 ),
+							THREE.MathUtils.clamp( num( d[ 5 ], 1 ) | 0, 0, 2 ) ] );
 
 				}
 
@@ -1247,7 +1278,8 @@ function hoverSupport( d ) {
 		const p = b3.b3Body_GetPosition( rec.body );
 		const rr = pickRadiusOf( rec );
 		const dx = p.x - d.target.x, dz = p.z - d.target.z;
-		const reach = rr * 0.9 + cr * 0.7;
+		// 收紧触发：大半悬在支撑物正上方才抬升——侧面靠近保持原高度，才能把件贴到别人脸上
+		const reach = rr * 0.55 + cr * 0.3;
 		if ( dx * dx + dz * dz > reach * reach ) continue;
 		const t = p.y + rr;
 		if ( t > top ) {
@@ -1304,7 +1336,7 @@ function dragControl() {
 
 function hop( rec ) {
 
-	rec.justPlaced = 0;
+	for ( const r of connectedOf( rec, true ) ) r.justPlaced = 0;
 	unfreezeCluster( rec );
 	const m = b3.b3Body_GetMass( rec.body );
 	b3.b3Body_ApplyLinearImpulseToCenter( rec.body, {
@@ -1410,11 +1442,10 @@ function rebuildClay() {
 		// 坑（负，雕刻）/ 包（正）/ 彩点（正，自带颜色）——局部坐标已按 k 存储
 		const dentS = strengthFor( DENT_R * k );
 		const bumpS = strengthFor( DENT_R * 0.85 * k );
-		const dabS = strengthFor( 0.14 * k );
 		for ( const d of rec.dents ) {
 
 			_v.set( d[ 0 ], d[ 1 ], d[ 2 ] ).applyQuaternion( _q );
-			if ( d[ 3 ] === 2 ) addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, dabS, DAB_COLORS[ d[ 4 ] || 0 ] );
+			if ( d[ 3 ] === 2 ) addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, strengthFor( DAB_R[ d[ 5 ] === undefined ? 1 : d[ 5 ] ] * k ), DAB_COLORS[ d[ 4 ] || 0 ] );
 			else addFieldBall( p.x + _v.x, p.y + _v.y, p.z + _v.z, d[ 3 ] === 1 ? bumpS : - dentS, rec.color );
 
 		}
@@ -1543,8 +1574,8 @@ function endDrag() {
 
 		b3.b3Body_SetType( drag.rec.body, b3.b3BodyType.b3_dynamicBody );
 		b3.b3Body_SetAwake( drag.rec.body, true );
-		// 刚放下的件享受快速定型：落稳一瞬间就定住，竖着的香肠才立得住
-		drag.rec.justPlaced = stepCount;
+		// 整个连通团都拿到“刚放置”资格：任一成员先稳住就把整团锚定（头重脚轻的组件才装得上去）
+		for ( const r of connectedOf( drag.rec, true ) ) r.justPlaced = stepCount;
 
 	}
 	drag = null;
@@ -1625,7 +1656,7 @@ function onPointerMove( e ) {
 			if ( ! session.lastDent || _v.distanceTo( session.lastDent ) > step ) {
 
 				if ( session.type === 'knead' ) addDentAt( session.rec, _v );
-				else addDabAt( session.rec, _v, selected );
+				else addDabAt( session.rec, _v, selected, sizeIndex );
 				session.dentCount = ( session.dentCount || 1 ) + 1;
 				session.lastDent = _v.clone();
 
@@ -1934,7 +1965,7 @@ function setupPointer() {
 			if ( kneadHit( rec, _v ) ) {
 
 				if ( mode === 'knead' ) addDentAt( rec, _v );
-				else addDabAt( rec, _v, selected );
+				else addDabAt( rec, _v, selected, sizeIndex );
 				session.lastDent = _v.clone();
 
 			}
@@ -1986,8 +2017,7 @@ function selectColor( i ) {
 
 function setupUI() {
 
-	const palette = document.getElementById( 'palette' );
-	const eyeBtn = document.getElementById( 'eyeBtn' );
+	const colorRow = document.getElementById( 'colorRow' );
 
 	CLAY_COLORS.forEach( ( c, i ) => {
 
@@ -2004,7 +2034,7 @@ function setupUI() {
 			'51% 49% 56% 44% / 44% 54% 46% 56%',
 		];
 		btn.style.borderRadius = blobs[ i % blobs.length ];
-		btn.style.setProperty( '--rot', [ - 4, 3, - 2, 4, - 3, 2 ][ i % 6 ] + 'deg' );
+		btn.style.setProperty( '--rot', [ - 4, 3, - 2, 4, - 3, 2, 3, - 3, 2, - 4, 4, - 2 ][ i % 12 ] + 'deg' );
 		btn.addEventListener( 'pointerdown', ( e ) => {
 
 			reclaimStalePointer( e );
@@ -2017,7 +2047,7 @@ function setupUI() {
 			beginSession( { type: 'palette', kind: 'clay', colorIndex: i, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false, pending: true } );
 
 		} );
-		palette.insertBefore( btn, eyeBtn );
+		colorRow.appendChild( btn );
 
 	} );
 
@@ -2040,7 +2070,7 @@ function setupUI() {
 
 	} );
 
-	for ( const [ id, kind ] of [ [ 'chainBtn', 'chain' ], [ 'eyeBtn', 'eye' ], [ 'mouthBtn', 'mouth' ], [ 'hatBtn', 'hat' ] ] ) {
+	for ( const [ id, kind ] of [ [ 'chainBtn', 'chain' ], [ 'eyeBtn', 'eye' ], [ 'mouthBtn', 'mouth' ], [ 'hatBtn', 'hat' ], [ 'bowBtn', 'bow' ] ] ) {
 
 		document.getElementById( id ).addEventListener( 'pointerdown', ( e ) => {
 
@@ -2838,7 +2868,7 @@ window.__clay = {
 		const p = b3.b3Body_GetPosition( rec.body );
 		const len = Math.hypot( ox, oy, oz ) || 1;
 		const r = rec.form === 0 ? CLAY_R_VIS * rec.k : FORMS[ rec.form ].pickR * 0.85 * rec.k;
-		addDabAt( rec, { x: p.x + ox / len * r, y: p.y + oy / len * r, z: p.z + oz / len * r }, ci === undefined ? selected : ci );
+		addDabAt( rec, { x: p.x + ox / len * r, y: p.y + oy / len * r, z: p.z + oz / len * r }, ci === undefined ? selected : ci, sizeIndex );
 		return rec.dents.length;
 
 	},
