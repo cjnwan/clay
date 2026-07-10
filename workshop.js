@@ -11,23 +11,51 @@ const SUBTRACT = 12;
 
 // 身体模板：局部系配方，y 向上、原点在底部中心、+z 朝脸。
 // 每球 { o:[x,y,z], r }，r 为期望视觉半径——Q 版比例的关键是头和身体差不多大
-// 经验：脖子沟要可见，球心距 / 平均半径 ≈ 1.5（更近就融成蛋，更远会断开）
+// 经验：脖子沟要可见，球心距 / 平均半径 ≈ 1.5（更近就融成蛋，更远会断开）。
+// headed=true 的模板末球是"头"，可以穿头套
 export const BODY_TEMPLATES = [
-	{ name: '圆滚滚', balls: [
+	{ name: '圆滚滚', headed: true, balls: [
 		{ o: [ 0, 0.5, 0 ], r: 0.68 },      // 圆身体
 		{ o: [ 0, 1.5, 0.03 ], r: 0.56 },   // 大脑袋，微微前倾
 	] },
-	{ name: '高豆子', balls: [
+	{ name: '高豆子', headed: true, balls: [
 		{ o: [ 0, 0.42, 0 ], r: 0.52 },
 		{ o: [ 0, 1.14, 0 ], r: 0.44 },
 		{ o: [ 0, 1.78, 0.03 ], r: 0.5 },
 	] },
-	{ name: '鼓肚子', balls: [
+	{ name: '鼓肚子', headed: true, balls: [
 		{ o: [ 0, 0.55, 0 ], r: 0.62 },
 		{ o: [ 0, 0.48, 0.3 ], r: 0.4 },   // 肚皮向前鼓（贴近本体，让它融进去）
 		{ o: [ 0, 1.42, 0.03 ], r: 0.55 },
 	] },
+	// —— 基础形状：一块一块搭大作品的原料 ——
+	{ name: '圆球', balls: [ { o: [ 0, 0.62, 0 ], r: 0.62 } ] },
+	{ name: '蛋蛋', headed: true, balls: [
+		{ o: [ 0, 0.55, 0 ], r: 0.58 },
+		{ o: [ 0, 1.18, 0 ], r: 0.46 },    // 故意贴近：融成蛋形
+	] },
+	{ name: '扁饼', balls: [
+		{ o: [ 0, 0.42, 0 ], r: 0.42 },
+		...Array.from( { length: 8 }, ( _, i ) => {
+			const a = ( i / 8 ) * Math.PI * 2;
+			return { o: [ Math.cos( a ) * 0.46, 0.42, Math.sin( a ) * 0.46 ], r: 0.36 };
+		} ),
+	] },
+	{ name: '香肠', balls: [
+		{ o: [ - 0.52, 0.48, 0 ], r: 0.44 },
+		{ o: [ 0, 0.5, 0 ], r: 0.48 },
+		{ o: [ 0.52, 0.48, 0 ], r: 0.44 },
+	] },
+	{ name: '方砖', balls: [
+		{ o: [ - 0.28, 0.44, - 0.28 ], r: 0.42 },
+		{ o: [ 0.28, 0.44, - 0.28 ], r: 0.42 },
+		{ o: [ - 0.28, 0.44, 0.28 ], r: 0.42 },
+		{ o: [ 0.28, 0.44, 0.28 ], r: 0.42 },
+	] },
 ];
+
+// 雕刻手感与黏土板一致（负球=坑、正球=包）
+const DENT_R = 0.3;
 
 // 工坊摆在远离黏土板的世界角落：相机飞过去就是全屏转场，主板场景零改动
 export const WORKSHOP_POS = new THREE.Vector3( 100, 0, 0 );
@@ -208,7 +236,7 @@ export function buildHoodPart( bodyGeo, template, y0, colorHex ) {
 
 // 把模板烘焙成静态 BufferGeometry 网格。
 // 域取紧立方包围盒；域底比最低点略高一点，边界裁切自然给出"坐得平"的压扁底。
-export function bakeBodyMesh( template, material, res = 88 ) {
+export function bakeBodyMesh( template, material, res = 88, sculpt = null ) {
 
 	const t0 = performance.now();
 
@@ -227,21 +255,36 @@ export function bakeBodyMesh( template, material, res = 88 ) {
 	// 底面上收：域底切进表面一点，边界钳制（addBall 只写 cell≥1）给出平整封口的“坐得平”的底
 	const FLATTEN = 0.07;
 	const y0 = surfMinY + FLATTEN;
-	const s = Math.max( maxX - minX, maxY - y0, maxZ - minZ ) / 2 + 0.02; // 域半尺寸（立方）
+	const bumpPad = sculpt && sculpt.some( ( d ) => d[ 3 ] === 1 ) ? 0.35 : 0; // 鼓包会顶出原包围盒
+	const s = Math.max( maxX - minX, maxY - y0, maxZ - minZ ) / 2 + 0.02 + bumpPad; // 域半尺寸（立方）
 	const cx = ( minX + maxX ) / 2, cz = ( minZ + maxZ ) / 2;
 	const cy = y0 + s;                // 域底恰在 y0
 
 	const mc = new MarchingCubes( res, material, false, false, 200000 );
+	const addBall = ( x, y, z, strength ) => mc.addBall(
+		( x - cx ) / ( 2 * s ) + 0.5,
+		( y - cy ) / ( 2 * s ) + 0.5,
+		( z - cz ) / ( 2 * s ) + 0.5,
+		strength, SUBTRACT );
+	const strengthFor = ( r ) => {
 
-	for ( const b of template.balls ) {
+		const rn = r / ( 2 * s );
+		return rn * rn * ( mc.isolation + SUBTRACT );
 
-		const rn = b.r / ( 2 * s );
-		const strength = rn * rn * ( mc.isolation + SUBTRACT );
-		mc.addBall(
-			( b.o[ 0 ] - cx ) / ( 2 * s ) + 0.5,
-			( b.o[ 1 ] - cy ) / ( 2 * s ) + 0.5,
-			( b.o[ 2 ] - cz ) / ( 2 * s ) + 0.5,
-			strength, SUBTRACT );
+	};
+
+	for ( const b of template.balls ) addBall( b.o[ 0 ], b.o[ 1 ], b.o[ 2 ], strengthFor( b.r ) );
+
+	// 雕刻球：坐标是烘焙后局部系（底在 y=0），换回模板系加 y0；手感与黏土板一致
+	if ( sculpt ) {
+
+		const dentS = strengthFor( DENT_R );
+		const bumpS = strengthFor( DENT_R * 0.85 );
+		for ( const d of sculpt ) {
+
+			addBall( d[ 0 ], d[ 1 ] + y0, d[ 2 ], d[ 3 ] === 1 ? bumpS : - dentS );
+
+		}
 
 	}
 

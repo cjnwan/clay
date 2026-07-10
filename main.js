@@ -2399,7 +2399,9 @@ function setupUI() {
 		if ( ! workshop ) return;
 		ensureAudio();
 		workshop.tplIndex = ( workshop.tplIndex + 1 ) % BODY_TEMPLATES.length;
+		workshop.sculpt = []; // 新形状从平整开始（跟黏土板"变形抹平旧坑"一致）
 		rebuildWsBody();
+		plop();
 
 	} );
 	document.getElementById( 'wsTurnBtn' ).addEventListener( 'pointerdown', ( e ) => {
@@ -2929,10 +2931,28 @@ const DEMO_RECIPES = [
 
 // ---------- 🧸 手办工坊：转盘台上搭 Q 版手办（无重力、精确放置） ----------
 
-function rebuildWsBody() {
+function rebuildWsBody( keepFitted ) {
 
 	const w = workshop;
 	if ( ! w || ! wsStage ) return;
+
+	// 头套等合身部件是按旧身体剪的：换身体丢弃；雕刻后按新身体重新剪一件（颜色不变）
+	const refit = [];
+	if ( w.parts ) {
+
+		for ( const en of [ ...w.parts ] ) {
+
+			if ( PARTS[ en.partId ].fitted ) {
+
+				if ( keepFitted ) refit.push( { partId: en.partId, colorHex: en.colorHex } );
+				wsDiscardEntry( en );
+
+			}
+
+		}
+
+	}
+
 	if ( w.figureMesh ) {
 
 		wsStage.figure.remove( w.figureMesh );
@@ -2947,22 +2967,42 @@ function rebuildWsBody() {
 		} );
 
 	}
-	const { mesh, y0 } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat );
+	const { mesh, y0 } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat, 88, w.sculpt && w.sculpt.length ? w.sculpt : null );
 	w.figureMesh = mesh;
 	w.bakeY0 = y0;
 	wsStage.figure.add( mesh );
-	// 头套是按旧身体剪裁的，换身体后穿不上了——收回
-	if ( w.parts ) {
 
-		for ( const en of [ ...w.parts ] ) {
+	for ( const f of refit ) {
 
-			if ( PARTS[ en.partId ].fitted ) wsDiscardEntry( en );
-
-		}
+		const built = buildHoodPart( mesh.geometry, BODY_TEMPLATES[ w.tplIndex ], y0, f.colorHex );
+		wsStage.figure.add( built.group );
+		w.parts.push( {
+			partId: f.partId, role: 'own', colorHex: f.colorHex, k: 1, fitted: true,
+			lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 0, 1 ),
+			group: built.group, mesh: built.mesh, mats: [ ...built.mats ],
+			twinGroup: null, twinMesh: null,
+		} );
 
 	}
 	markDirty();
-	plop();
+
+}
+
+// 雕刻：往当前身体的配方里加一颗正/负小球再重烘焙（~50ms，无感）。
+// 命中来自 wsSurfaceHit；坑心压进表面一点才咬得动，包心悬出一点才鼓得起来
+function wsSculptAt( hit, type ) {
+
+	if ( ! workshop ) return;
+	if ( ! workshop.sculpt ) workshop.sculpt = [];
+	const off = type === 1 ? 0.2 : 0.16;
+	const px = hit.lp.x + hit.ln.x * ( type === 1 ? off : - off );
+	const py = hit.lp.y + hit.ln.y * ( type === 1 ? off : - off );
+	const pz = hit.lp.z + hit.ln.z * ( type === 1 ? off : - off );
+	workshop.sculpt.push( [ px, py, pz, type ] );
+	if ( Math.abs( hit.lp.x ) > 0.12 ) workshop.sculpt.push( [ - px, py, pz, type ] ); // 左右对称，跟部件一致
+	while ( workshop.sculpt.length > 28 ) workshop.sculpt.shift();
+	rebuildWsBody( true );
+	if ( type === 1 ) boing(); else squish();
 
 }
 
@@ -2975,7 +3015,7 @@ const _ci = ( v ) => THREE.MathUtils.clamp( _num( v, 0 ) | 0, 0, CLAY_COLORS.len
 function wsFigData( w ) {
 
 	if ( ! w || ! w.figureMesh ) return null;
-	return {
+	const fd = {
 		t: w.tplIndex, c: w.colorIndex,
 		ps: w.parts.map( ( en ) => ( {
 			p: en.partId, k: r3( en.k ), c: Math.max( 0, CLAY_COLORS.indexOf( en.colorHex ) ),
@@ -2983,6 +3023,19 @@ function wsFigData( w ) {
 			ln: [ r3( en.ln.x ), r3( en.ln.y ), r3( en.ln.z ) ],
 		} ) ),
 	};
+	if ( w.sculpt && w.sculpt.length ) fd.s = w.sculpt.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 1 ? 1 : - 1 ] );
+	return fd;
+
+}
+
+// 存档里的雕刻列表 → 夹取后的干净副本
+function sanitizeSculpt( s ) {
+
+	return ( Array.isArray( s ) ? s : [] ).slice( 0, 28 ).filter( Array.isArray ).map( ( d ) => [
+		THREE.MathUtils.clamp( _num( d[ 0 ], 0 ), - 3, 3 ),
+		THREE.MathUtils.clamp( _num( d[ 1 ], 0 ), - 3, 3 ),
+		THREE.MathUtils.clamp( _num( d[ 2 ], 0 ), - 3, 3 ),
+		d[ 3 ] === 1 ? 1 : - 1 ] );
 
 }
 
@@ -2998,7 +3051,8 @@ function createFigure( fd, x, baseY, z ) {
 		color: CLAY_COLORS[ _ci( fd.c ) ],
 		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
 	} );
-	const { mesh: bodyMesh, y0 } = bakeBodyMesh( template, mat );
+	const sculpt = sanitizeSculpt( fd.s );
+	const { mesh: bodyMesh, y0 } = bakeBodyMesh( template, mat, 88, sculpt.length ? sculpt : null );
 
 	// 身高与中心：刚体原点放在半身高处，拾取球才罩得住整只
 	let topY = 0;
@@ -3090,7 +3144,7 @@ function createFigure( fd, x, baseY, z ) {
 // 从存档配方还原工坊里的半成品
 function restoreWorkshop( fd ) {
 
-	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
+	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: sanitizeSculpt( fd.s ) };
 	rebuildWsBody();
 	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
 
@@ -3136,7 +3190,7 @@ function enterWorkshop() {
 		wsSavedData = null;
 
 	}
-	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
+	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: [] };
 	if ( ! workshop.figureMesh ) rebuildWsBody();
 	selectWsColor( workshop.colorIndex );
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
@@ -3202,6 +3256,8 @@ function wsAddPartEntry( partId ) {
 
 	if ( workshop.parts.length >= MAX_WS_PARTS ) { shakePalette(); return null; }
 	const def = PARTS[ partId ];
+	// 头套只有"有头"的模板穿得上（基础形状没有头）
+	if ( def.fitted && ! BODY_TEMPLATES[ workshop.tplIndex ].headed ) { shakePalette(); return null; }
 	const colorHex = CLAY_COLORS[ def.role === 'own' ? workshop.partColorIndex : workshop.colorIndex ];
 
 	// 头套：按当前身体现做现剪
@@ -4006,6 +4062,7 @@ window.__clay = {
 	dragInfo: () => ( drag ? { id: drag.rec.id, target: drag.target.toArray(), quat: drag.targetQuat.toArray() } : null ),
 	// 🧸 工坊开关与状态（测试用）
 	ws: () => { workshop ? exitWorkshop() : enterWorkshop(); return ! ! workshop; },
+	wsSculpt: ( lx, ly, lz, nx, ny, nz, type = - 1 ) => wsSculptAt( { lp: new THREE.Vector3( lx, ly, lz ), ln: new THREE.Vector3( nx, ny, nz ).normalize() }, type ),
 	wsState: () => ( workshop ? {
 		tpl: workshop.tplIndex, ci: workshop.colorIndex, yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ),
 		placing: workshop.placing,
