@@ -83,6 +83,39 @@ export const PARTS = {
 		return m;
 
 	} },
+	hood: { name: '头套', fitted: true, paired: false, sink: 0, role: 'own', build: null }, // 特殊：由 buildHoodPart 按当前身体生成
+	eye: { name: '眼睛', paired: true, sink: 0.03, role: 'fixed', build: () => {
+
+		const g = new THREE.Group();
+		const white = new THREE.Mesh( new THREE.SphereGeometry( 0.1, 16, 12 ),
+			new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.35 } ) );
+		white.scale.set( 1, 1, 0.45 );
+		const pupil = new THREE.Mesh( new THREE.SphereGeometry( 0.052, 12, 10 ),
+			new THREE.MeshStandardMaterial( { color: 0x2f2620, roughness: 0.3 } ) );
+		pupil.position.z = 0.045;
+		g.add( white, pupil );
+		return g;
+
+	} },
+	mouth: { name: '嘴巴', paired: false, sink: 0.005, role: 'fixed', centerSnap: true, build: () => {
+
+		// 小小的 ω 嘴：细管沿弧线
+		const curve = new THREE.CatmullRomCurve3( [
+			new THREE.Vector3( - 0.085, 0.03, 0 ),
+			new THREE.Vector3( - 0.04, - 0.035, 0.01 ),
+			new THREE.Vector3( 0, 0.01, 0.012 ),
+			new THREE.Vector3( 0.04, - 0.035, 0.01 ),
+			new THREE.Vector3( 0.085, 0.03, 0 ),
+		] );
+		return new THREE.Mesh( new THREE.TubeGeometry( curve, 16, 0.02, 8 ),
+			new THREE.MeshStandardMaterial( { color: 0x5a4030, roughness: 0.5 } ) );
+
+	} },
+	dot: { name: '圆点', paired: false, sink: 0.02, role: 'own', build: ( mat ) => {
+
+		return new THREE.Mesh( new THREE.SphereGeometry( 0.055, 12, 10 ), mat );
+
+	} },
 };
 
 // 造一个部件实例：独立材质（幽灵态要单独调透明度），黏土质感与本体一致
@@ -94,10 +127,82 @@ export function buildPart( partId, colorHex ) {
 		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
 	} );
 	const group = new THREE.Group();
-	const mesh = def.build( mat );
-	mesh.userData.isPart = true;
-	group.add( mesh );
-	return { group, mesh, mat };
+	const built = def.build( mat );
+	group.add( built );
+	const mats = [];
+	group.traverse( ( o ) => {
+
+		if ( o.isMesh ) {
+
+			o.userData.isPart = true;
+			if ( ! mats.includes( o.material ) ) mats.push( o.material );
+
+		}
+
+	} );
+	return { group, mesh: built, mats };
+
+}
+
+// 头套：身体网格沿法线膨胀一圈 + 剪出脸部开口 + 底部收口 + 开口卷边。
+// —— 截图里"玩偶服露脸"的关键：开口边界是网格边，硬边界无条件成立
+export function buildHoodPart( bodyGeo, template, y0, colorHex ) {
+
+	const OFF = 0.055;                                         // 布料厚度感
+	const head = template.balls[ template.balls.length - 1 ];  // 约定：最后一球是头
+	const hc = new THREE.Vector3( head.o[ 0 ], head.o[ 1 ] - y0, head.o[ 2 ] );
+	const faceDir = new THREE.Vector3( 0, 0.1, 1 ).normalize();
+	const fc = hc.clone().addScaledVector( faceDir, head.r );  // 脸开口球心（头表面上）
+	const rOpen = head.r * 0.8;
+
+	const pos = bodyGeo.getAttribute( 'position' );
+	const nor = bodyGeo.getAttribute( 'normal' );
+	const P = [], N = [];
+	const va = new THREE.Vector3(), na = new THREE.Vector3(), cen = new THREE.Vector3();
+
+	for ( let i = 0; i < pos.count; i += 3 ) {
+
+		// 三角形质心（膨胀后）落在脸开口球内、或贴着地面 → 剪掉
+		cen.set( 0, 0, 0 );
+		for ( let j = 0; j < 3; j ++ ) {
+
+			va.fromBufferAttribute( pos, i + j ).addScaledVector( na.fromBufferAttribute( nor, i + j ), OFF );
+			cen.add( va );
+
+		}
+		cen.multiplyScalar( 1 / 3 );
+		if ( cen.distanceTo( fc ) < rOpen || cen.y < 0.055 ) continue;
+		for ( let j = 0; j < 3; j ++ ) {
+
+			va.fromBufferAttribute( pos, i + j );
+			na.fromBufferAttribute( nor, i + j );
+			va.addScaledVector( na, OFF );
+			P.push( va.x, va.y, va.z );
+			N.push( na.x, na.y, na.z );
+
+		}
+
+	}
+
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array( P ), 3 ) );
+	geo.setAttribute( 'normal', new THREE.BufferAttribute( new Float32Array( N ), 3 ) );
+
+	const mat = new THREE.MeshPhysicalMaterial( {
+		color: colorHex,
+		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
+	} );
+	const group = new THREE.Group();
+	const shell = new THREE.Mesh( geo, mat );
+
+	// 开口卷边：真黏土博主都会给开口滚一条边（也盖住裁剪毛边）
+	const rim = new THREE.Mesh( new THREE.TorusGeometry( rOpen * 0.86, 0.068, 10, 40 ), mat );
+	rim.position.copy( hc ).addScaledVector( faceDir, head.r + OFF - 0.045 );
+	rim.quaternion.setFromUnitVectors( new THREE.Vector3( 0, 0, 1 ), faceDir );
+	group.add( shell, rim );
+
+	group.traverse( ( o ) => { if ( o.isMesh ) o.userData.isPart = true; } );
+	return { group, mesh: shell, mats: [ mat ] };
 
 }
 
@@ -152,6 +257,6 @@ export function bakeBodyMesh( template, material, res = 88 ) {
 	mc.geometry.dispose();
 
 	const mesh = new THREE.Mesh( geo, material );
-	return { mesh, ms: performance.now() - t0, tris: n / 3 };
+	return { mesh, ms: performance.now() - t0, tris: n / 3, y0 };
 
 }

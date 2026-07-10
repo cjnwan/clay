@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Box3D from 'box3d.js/inline';
-import { BODY_TEMPLATES, bakeBodyMesh, buildWorkshopStage, WORKSHOP_POS, PARTS, buildPart } from './workshop.js';
+import { BODY_TEMPLATES, bakeBodyMesh, buildWorkshopStage, WORKSHOP_POS, PARTS, buildPart, buildHoodPart } from './workshop.js';
 
 // ---------- 常量 ----------
 
@@ -2870,9 +2870,20 @@ function rebuildWsBody() {
 		} );
 
 	}
-	const { mesh } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat );
+	const { mesh, y0 } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat );
 	w.figureMesh = mesh;
+	w.bakeY0 = y0;
 	wsStage.figure.add( mesh );
+	// 头套是按旧身体剪裁的，换身体后穿不上了——收回
+	if ( w.parts ) {
+
+		for ( const en of [ ...w.parts ] ) {
+
+			if ( PARTS[ en.partId ].fitted ) wsDiscardEntry( en );
+
+		}
+
+	}
 	markDirty();
 	plop();
 
@@ -2927,16 +2938,22 @@ function selectWsColor( i ) {
 // 身体表面命中（figure 局部系）：点 + 平滑法线（面三顶点法线平均）
 function wsSurfaceHit() {
 
-	const body = workshop && workshop.figureMesh;
-	if ( ! body ) return null;
-	const hits = raycaster.intersectObject( body, false );
+	if ( ! workshop || ! workshop.figureMesh ) return null;
+	// 穿了头套后部件长在头套表面上；脸开口处露出身体，命中自然回落到身体
+	const targets = [ workshop.figureMesh ];
+	for ( const en of workshop.parts ) {
+
+		if ( en.fitted && ( ! wsPlace || wsPlace.entry !== en ) ) targets.push( en.mesh );
+
+	}
+	const hits = raycaster.intersectObjects( targets, false );
 	if ( ! hits.length ) return null;
 	const h = hits[ 0 ];
-	const na = body.geometry.getAttribute( 'normal' );
+	const na = h.object.geometry.getAttribute( 'normal' );
 	_v.set( 0, 0, 0 );
 	for ( const idx of [ h.face.a, h.face.b, h.face.c ] ) _v.add( _v2.fromBufferAttribute( na, idx ) );
 	_v.normalize();
-	// body 在 figure 里没有额外旋转：对象空间法线即 figure 局部法线
+	// 身体/头套在 figure 里都没有额外旋转：对象空间法线即 figure 局部法线
 	return { lp: wsStage.figure.worldToLocal( h.point.clone() ), ln: _v.clone() };
 
 }
@@ -2947,12 +2964,16 @@ function wsAddPartEntry( partId ) {
 	if ( workshop.parts.length >= MAX_WS_PARTS ) { shakePalette(); return null; }
 	const def = PARTS[ partId ];
 	const colorHex = CLAY_COLORS[ def.role === 'own' ? workshop.partColorIndex : workshop.colorIndex ];
-	const a = buildPart( partId, colorHex );
+
+	// 头套：按当前身体现做现剪
+	const a = def.fitted
+		? buildHoodPart( workshop.figureMesh.geometry, BODY_TEMPLATES[ workshop.tplIndex ], workshop.bakeY0, colorHex )
+		: buildPart( partId, colorHex );
 	wsStage.figure.add( a.group );
 	const entry = {
-		partId, role: def.role, colorHex, k: 1,
+		partId, role: def.role, colorHex, k: 1, fitted: !! def.fitted,
 		lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 0, 1 ),
-		group: a.group, mesh: a.mesh, mats: [ a.mat ],
+		group: a.group, mesh: a.mesh, mats: [ ...a.mats ],
 		twinGroup: null, twinMesh: null,
 	};
 	if ( def.paired ) {
@@ -2961,7 +2982,7 @@ function wsAddPartEntry( partId ) {
 		wsStage.figure.add( b.group );
 		entry.twinGroup = b.group;
 		entry.twinMesh = b.mesh;
-		entry.mats.push( b.mat );
+		entry.mats.push( ...b.mats );
 
 	}
 	return entry;
@@ -3014,7 +3035,11 @@ function pickWsPart() {
 
 			for ( const en of workshop.parts ) {
 
-				if ( en.mesh === h.object || en.twinMesh === h.object ) return en;
+				for ( let o = h.object; o && o !== wsStage.figure; o = o.parent ) {
+
+					if ( o === en.group || o === en.twinGroup ) return en;
+
+				}
 
 			}
 
@@ -3033,9 +3058,20 @@ function wsPlaceMoveTo( e ) {
 	if ( hit ) {
 
 		const def = PARTS[ en.partId ];
-		if ( def.centerSnap && Math.abs( hit.lp.x ) < 0.16 ) hit.lp.x *= 0.25; // 中线软吸附（鼻子、肚兜放得正）
-		en.ln.copy( hit.ln );
-		en.lp.copy( hit.lp ).addScaledVector( hit.ln, - def.sink * en.k );
+		if ( en.fitted ) {
+
+			// 头套是合身的：指着身体就穿上（位姿固定），拖开才脱下
+			en.lp.set( 0, 0, 0 );
+			en.ln.set( 0, 0, 1 );
+			en.k = 1;
+
+		} else {
+
+			if ( def.centerSnap && Math.abs( hit.lp.x ) < 0.16 ) hit.lp.x *= 0.25; // 中线软吸附（鼻子、肚兜放得正）
+			en.ln.copy( hit.ln );
+			en.lp.copy( hit.lp ).addScaledVector( hit.ln, - def.sink * en.k );
+
+		}
 		applyWsPose( en );
 		wsPlace.valid = true;
 
@@ -3204,7 +3240,7 @@ function wsPointerDown( e ) {
 	// 放置中落第二指：进入捏合调大小
 	if ( wsPlace ) {
 
-		if ( e.pointerId !== wsPlace.id && ! wsPlace.pinch ) {
+		if ( e.pointerId !== wsPlace.id && ! wsPlace.pinch && ! wsPlace.entry.fitted ) {
 
 			const d = Math.hypot( e.clientX - wsPlace.x, e.clientY - wsPlace.y );
 			if ( d > 40 ) wsPlace.pinch = { id2: e.pointerId, startDist: d, startK: wsPlace.entry.k };
