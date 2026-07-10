@@ -2135,6 +2135,18 @@ function setupUI() {
 
 	} );
 
+	// 🎥 作品短片
+	document.getElementById( 'clipBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		reclaimStalePointer( e );
+		if ( session ) return;
+		e.preventDefault();
+		ensureAudio();
+		stopDemo();
+		recordClip();
+
+	} );
+
 	// 清空是不可挽回的：按住 0.7 秒才触发，防止小孩误触
 	const clearBtn = document.getElementById( 'clearBtn' );
 	let clearHold = null;
@@ -2317,6 +2329,67 @@ const DEMO_RECIPES = [
 		await S.wait( 1500 );
 
 	} },
+	{ name: '生日蛋糕', run: async ( S ) => {
+
+		S.say( '烤一个大蛋糕底' );
+		const base = S.clay( 0, 0, 2, 1.5 ); await S.wait( 1100 );
+		S.morph( base ); await S.wait( 1300 );
+		S.say( '再叠一层' );
+		const mid = S.clay( 0.02, 0.02, 0, 1.05 ); await S.wait( 1300 );
+		S.morph( mid ); await S.wait( 1300 );
+		S.say( '顶上一颗小圆顶' );
+		S.clay( 0, 0.03, 5, 0.62 ); await S.wait( 1400 );
+		S.say( '🖌 挤一圈糖霜' );
+		for ( let i = 0; i < 6; i ++ ) {
+
+			const a = i / 6 * Math.PI * 2;
+			S.dab( base, Math.cos( a ) * 0.6, 1, Math.sin( a ) * 0.6, 4 );
+			await S.wait( 240 );
+
+		}
+		for ( let i = 0; i < 4; i ++ ) {
+
+			const a = i / 4 * Math.PI * 2 + 0.4;
+			S.dab( mid, Math.cos( a ) * 0.5, 1, Math.sin( a ) * 0.5, 2 );
+			await S.wait( 240 );
+
+		}
+		S.say( '插上蜡烛！' );
+		S.decor( 'hat', 0, - 0.02 );
+		await S.wait( 1600 );
+
+	} },
+	{ name: '汉堡', run: async ( S ) => {
+
+		S.say( '下层面包' );
+		const bun = S.clay( 0, 0.1, 1, 1.25 ); await S.wait( 1100 );
+		S.morph( bun ); await S.wait( 1200 );
+		S.say( '生菜～' );
+		const let2 = S.clay( 0.02, 0.12, 3, 1.15 ); await S.wait( 1200 );
+		S.morph( let2 ); await S.wait( 1100 );
+		S.say( '肉饼！' );
+		const pat = S.clay( 0, 0.08, 0, 1.05 ); await S.wait( 1200 );
+		S.morph( pat ); await S.wait( 1100 );
+		S.say( '盖上圆面包' );
+		const top = S.clay( 0.01, 0.1, 1, 1.05 ); await S.wait( 1500 );
+		S.say( '🖌 撒点芝麻' );
+		const seeds = [ [ - 0.3, 0.8, 0.4 ], [ 0.35, 0.85, 0.3 ], [ 0, 0.95, - 0.2 ], [ - 0.2, 0.85, - 0.35 ], [ 0.25, 0.8, - 0.4 ] ];
+		for ( const s of seeds ) { S.dab( top, s[ 0 ], s[ 1 ], s[ 2 ], 2 ); await S.wait( 220 ); }
+		await S.wait( 1400 );
+
+	} },
+	{ name: '瓢虫', run: async ( S ) => {
+
+		S.say( '一颗红红的身体' );
+		const bug = S.clay( 0, 0.3, 0, 1.15 ); await S.wait( 1300 );
+		S.say( '🖌 点上斑点' );
+		const spots = [ [ - 0.4, 0.7, 0.35 ], [ 0.45, 0.75, 0.25 ], [ 0, 0.9, - 0.15 ], [ - 0.45, 0.6, - 0.4 ], [ 0.4, 0.55, - 0.45 ], [ 0, 0.5, 0.75 ] ];
+		for ( const s of spots ) { S.dab( bug, s[ 0 ], s[ 1 ], s[ 2 ], 5 ); await S.wait( 260 ); }
+		S.say( '一对大眼睛' );
+		S.eye( - 0.2, 0.62 ); await S.wait( 800 );
+		S.eye( 0.22, 0.64 ); await S.wait( 1500 );
+
+	} },
 	{ name: '小房子', run: async ( S ) => {
 
 		S.say( '摆四颗球' );
@@ -2364,7 +2437,16 @@ async function startDemo() {
 
 		} ),
 		say: ( t ) => setHint( '🎬 ' + recipe.name + '：' + t ),
-		clay: ( x, z, c ) => createClay( x, 3, z, c, null, 1 ),
+		clay: ( x, z, c, k ) => createClay( x, 3, z, c, null, k || 1 ),
+		dab: ( rec, ox, oy, oz, ci ) => {
+
+			if ( ! rec || ! rec.alive ) return;
+			const p = b3.b3Body_GetPosition( rec.body );
+			const len = Math.hypot( ox, oy, oz ) || 1;
+			const r = ( rec.form === 0 ? CLAY_R_VIS : FORMS[ rec.form ].pickR * 0.85 ) * rec.k;
+			addDabAt( rec, { x: p.x + ox / len * r, y: p.y + oy / len * r, z: p.z + oz / len * r }, ci );
+
+		},
 		chain: ( x, z, c ) => createChain( x, z, c, 1 ),
 		decor: ( kind, x, z ) => createDecor( kind, x, 3, z ),
 		eye: ( x, z ) => createDecor( 'eye', x, 3, z ),
@@ -2400,6 +2482,107 @@ async function startDemo() {
 		// demo-stopped：孩子接管了，安静退场
 
 	}
+
+}
+
+// ---------- 🎥 作品短片：镜头环绕一圈，录成视频保存 ----------
+
+let clipRec = null; // { recorder, t0, dur, dist, h }
+
+function recordClip( dur ) {
+
+	if ( clipRec || demoRun ) return;
+	if ( ! ( 'MediaRecorder' in window ) || ! renderer.domElement.captureStream ) {
+
+		setHint( '这个浏览器不支持录像，换 Chrome/Safari 新版试试' );
+		setTimeout( resetHint, 2600 );
+		return;
+
+	}
+	if ( ! balls.length ) {
+
+		setHint( '先捏一个作品，再来拍片～' );
+		setTimeout( resetHint, 2600 );
+		return;
+
+	}
+
+	try {
+
+		// captureStream(0) + requestFrame：渲染后显式喂帧，不依赖合成器节奏
+		const stream = renderer.domElement.captureStream( 0 );
+		// Chrome 优先 webm（成熟稳定），Safari 不支持 webm 时回退 mp4
+		const mime = MediaRecorder.isTypeSupported( 'video/webm;codecs=vp9' ) ? 'video/webm;codecs=vp9'
+			: MediaRecorder.isTypeSupported( 'video/webm' ) ? 'video/webm'
+			: MediaRecorder.isTypeSupported( 'video/mp4' ) ? 'video/mp4' : '';
+		if ( ! mime ) { setHint( '这个浏览器不支持录像' ); setTimeout( resetHint, 2600 ); return; }
+		const recorder = new MediaRecorder( stream, { mimeType: mime, videoBitsPerSecond: 6e6 } );
+		const chunks = [];
+		recorder.ondataavailable = ( e ) => { if ( e.data.size ) chunks.push( e.data ); };
+		recorder.onstop = () => {
+
+			const blob = new Blob( chunks, { type: mime } );
+			window.__clay.lastClipSize = blob.size;
+			if ( blob.size < 2000 ) {
+
+				setHint( '录像没拍到内容，再试一次？' );
+				setTimeout( resetHint, 2600 );
+				return;
+
+			}
+			const a = document.createElement( 'a' );
+			a.href = URL.createObjectURL( blob );
+			a.download = 'clay-' + Math.round( performance.now() ) + ( mime.startsWith( 'video/mp4' ) ? '.mp4' : '.webm' );
+			a.click();
+			setTimeout( () => URL.revokeObjectURL( a.href ), 5000 );
+			setHint( '🎥 短片已保存！' );
+			setTimeout( resetHint, 2600 );
+
+		};
+		recorder.start();
+		clipRec = {
+			recorder,
+			track: stream.getVideoTracks()[ 0 ],
+			t0: performance.now(),
+			dur: dur || 5200,
+			dist: camera.position.length(),
+			h: camera.position.y,
+		};
+		setHint( '🎥 正在给作品拍片…别动，转一圈就好' );
+
+	} catch ( err ) {
+
+		console.warn( 'record failed:', err );
+		setHint( '录像启动失败' );
+		setTimeout( resetHint, 2600 );
+
+	}
+
+}
+
+// 录制期间每帧驱动环绕镜头；结束后恢复原机位
+function pushClipFrame() {
+
+	if ( clipRec && clipRec.track && clipRec.track.requestFrame ) clipRec.track.requestFrame();
+
+}
+
+function clipCamera() {
+
+	if ( ! clipRec ) return;
+	const t = ( performance.now() - clipRec.t0 ) / clipRec.dur;
+	if ( t >= 1 ) {
+
+		try { clipRec.recorder.stop(); } catch ( err ) {}
+		clipRec = null;
+		frameCamera();
+		return;
+
+	}
+	const a = t * Math.PI * 2;
+	const r = Math.hypot( clipRec.dist * clipRec.dist - clipRec.h * clipRec.h ) ** 0.5 || clipRec.dist * 0.75;
+	camera.position.set( Math.sin( a ) * r, clipRec.h, Math.cos( a ) * r );
+	camera.lookAt( 0, 0.7, 0 );
 
 }
 
@@ -2598,9 +2781,11 @@ function animate() {
 	}
 
 	pumpDemoWaiters();
+	clipCamera();
 	syncEyes();
 	rebuildClay();
 	renderer.render( scene, camera );
+	pushClipFrame();
 
 }
 
@@ -2661,6 +2846,7 @@ window.__clay = {
 
 	},
 	clear: () => clearAll(),
+	clip: ( ms ) => recordClip( ms ),
 	save: () => { saveScene(); return location.href; },
 	load: ( data ) => loadScene( typeof data === 'string' ? JSON.parse( data ) : data ),
 	dump: () => serializeScene(),
@@ -2686,10 +2872,12 @@ window.__clay = {
 
 		}
 		pumpDemoWaiters();
+		clipCamera();
 		syncEyes();
 		markDirty();
 		rebuildClay();
 		renderer.render( scene, camera );
+		pushClipFrame();
 		return window.__clay.state();
 
 	},

@@ -48,6 +48,8 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
   Dragging a decoration moves **just that piece** (it unsticks, follows your finger
   without snagging, and re-sticks where you drop it); dragging clay moves the whole
   creation.
+- **🎥 clip** — records a 5-second orbit of your creation and saves it as a video
+  (webm on Chrome, mp4 on Safari) — your build becomes a shareable short.
 - **🧹** — hold to clear the board.
 
 Works with mouse and touch (pointer events throughout).
@@ -68,6 +70,10 @@ to take over mid-show.
   sausage; random orientations read as sprawling tentacles.
 - **Doughnut / thumbprint cookie** — flatten a ball, then knead (🤏) the center
   repeatedly for a doughnut, or a ring of pokes for a crinkle-edge cookie.
+- **Birthday cake** — two flattened tiers (large + medium), a dome on top, frosting
+  dabs (🖌) around each tier, and the party hat as the candle.
+- **Burger** — bun pancake, lettuce pancake, patty pancake, ball bun on top, sesame
+  dabs. **Ladybug** — a red ball, purple spot dabs, two eyes.
 - Tip: to attach a piece high (Mickey ears), just hold it in place for a moment —
   the build sets and it stays.
 

@@ -69,7 +69,7 @@
 		}
 
 		#palette button {
-			width: clamp(26px, 5.2vw, 54px);
+			width: clamp(25px, 4.9vw, 54px);
 			height: auto;
 			aspect-ratio: 1 / 1;
 			border-radius: 50%;
@@ -107,7 +107,7 @@
 		}
 
 		@media (pointer: coarse) {
-			#palette button { width: clamp(30px, 5.2vw, 58px); }
+			#palette button { width: clamp(28px, 4.9vw, 58px); }
 			#hint { bottom: 116px; }
 		}
 
@@ -146,7 +146,7 @@
 	<div id="loading">🥣 和泥中…</div>
 
 	<div id="title">捏黏土<small>three.js + box3d.js</small></div>
-	<div id="hint">点颜色加黏土 · 拖动搬家 · 靠近黏住 · 按住变形 · 拖住时：加一指捏合缩放旋转 · 🤸 翻跟头 · 双击拆开 · ● 大小 · 🐍 小蛇 · 👀👄🎩 装饰 · 🤏✂️🖌 工具 · 🎬 表演 · 🧹 按住清空 · 网址就是分享链接</div>
+	<div id="hint">点颜色加黏土 · 拖动搬家 · 靠近黏住 · 按住变形 · 拖住时：加一指捏合缩放旋转 · 🤸 翻跟头 · 双击拆开 · ● 大小 · 🐍 小蛇 · 👀👄🎩 装饰 · 🤏✂️🖌 工具 · 🎬 表演 · 🎥 拍短片 · 🧹 按住清空 · 网址就是分享链接</div>
 
 	<div id="palette">
 		<button id="sizeBtn" title="大小"><svg viewBox="0 0 44 44"><circle cx="22" cy="23" r="10" fill="#b98a5a" stroke="#6b4a2b" stroke-width="3"/><circle cx="18.5" cy="19" r="2.6" fill="#e8cfa8" opacity="0.85"/></svg></button>
@@ -159,6 +159,7 @@
 		<button id="paintBtn" title="上色：选个颜色点一点"><svg viewBox="0 0 44 44"><path d="M30,6 L14,26" stroke="#8a5a33" stroke-width="4.2" stroke-linecap="round"/><path d="M14,26 Q8,28 7,35 Q13,36 16,31 Q18,28 14,26 Z" fill="#e8a878" stroke="#b97a4e" stroke-width="2"/><circle cx="33" cy="10" r="4" fill="#e0584b" opacity="0.9"/><circle cx="27" cy="35" r="3" fill="#53a7dd" opacity="0.9"/><circle cx="37" cy="24" r="2.6" fill="#7dbb5f" opacity="0.9"/></svg></button>
 		<button id="kneadBtn" title="捏一捏"><svg viewBox="0 0 44 44"><path d="M6,13 Q20,6 31,15" fill="none" stroke="#e8a878" stroke-width="6" stroke-linecap="round"/><path d="M6,32 Q20,38 31,27" fill="none" stroke="#e8a878" stroke-width="6" stroke-linecap="round"/><circle cx="35.5" cy="21" r="5" fill="#c94f43" stroke="#8c3428" stroke-width="2.2"/></svg></button>
 		<button id="demoBtn" title="看表演"><svg viewBox="0 0 44 44"><path d="M10,36 L26,18" stroke="#8a5a33" stroke-width="4.5" stroke-linecap="round"/><path d="M30,5 L32.2,11.5 L39,14 L32.2,16.5 L30,23 L27.8,16.5 L21,14 L27.8,11.5 Z" fill="#f6d155" stroke="#c9a02e" stroke-width="1.8" stroke-linejoin="round"/><path d="M14,17 l0,5 m-2.5,-2.5 l5,0" stroke="#f0b64e" stroke-width="2" stroke-linecap="round"/><path d="M36,29 l0,4 m-2,-2 l4,0" stroke="#f0b64e" stroke-width="2" stroke-linecap="round"/></svg></button>
+		<button id="clipBtn" title="给作品拍一段环绕短片"><svg viewBox="0 0 44 44"><rect x="5" y="14" width="24" height="17" rx="4.5" fill="#8a9aa8" stroke="#5d6b77" stroke-width="2.4"/><path d="M29,20 L39,15 L39,30 L29,25 Z" fill="#5d6b77"/><circle cx="17" cy="22.5" r="5.5" fill="#dbe4ea" stroke="#5d6b77" stroke-width="2"/><circle cx="9" cy="10" r="3.4" fill="#e0584b"/></svg></button>
 		<button id="clearBtn" title="收拾干净（按住）"><svg viewBox="0 0 44 44"><path d="M29,5 L20,22" stroke="#8a5a33" stroke-width="4.2" stroke-linecap="round"/><path d="M20,22 L10,37 M21.5,23.5 L16,38 M23,24 L22,39 M24.5,23.5 L28,37" stroke="#d9a75a" stroke-width="3.4" stroke-linecap="round"/><path d="M17.5,20 L26,24" stroke="#b9822e" stroke-width="3.6" stroke-linecap="round"/></svg></button>
 	</div>
 
