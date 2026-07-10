@@ -1139,7 +1139,9 @@ function freezePass() {
 		if ( v.x * v.x + v.y * v.y + v.z * v.z < FREEZE_LIN2
 			&& w.x * w.x + w.y * w.y + w.z * w.z < FREEZE_ANG2 ) {
 
-			const need = rec.justPlaced && stepCount - rec.justPlaced < 120 ? 1 : 2;
+			// 刚放下的快速定型要避开“松手瞬间还没开始下落”的窗口（20 步后才生效，此时仍在空中的件速度已大）
+			const sincePlaced = rec.justPlaced ? stepCount - rec.justPlaced : 1e9;
+			const need = sincePlaced > 20 && sincePlaced < 140 ? 1 : 2;
 			if ( ++ rec.slowTicks >= need ) {
 
 				b3.b3Body_SetType( rec.body, b3.b3BodyType.b3_staticBody );
@@ -1158,9 +1160,47 @@ function freezePass() {
 
 }
 
+// 堆叠的核心：抓着的件自动悬浮在手指下方最高支撑物之上（排除自己连着的整团）
+function hoverSupport( d ) {
+
+	const exclude = new Set( connectedOf( d.rec, true ).map( ( r ) => r.id ) );
+	const cr = pickRadiusOf( d.rec );
+	let top = 0, snap = null;
+	for ( const rec of balls ) {
+
+		if ( ! rec.alive || exclude.has( rec.id ) ) continue;
+		const p = b3.b3Body_GetPosition( rec.body );
+		const rr = pickRadiusOf( rec );
+		const dx = p.x - d.target.x, dz = p.z - d.target.z;
+		const reach = rr * 0.9 + cr * 0.7;
+		if ( dx * dx + dz * dz > reach * reach ) continue;
+		const t = p.y + rr;
+		if ( t > top ) {
+
+			top = t;
+			// 双方都是黏土且接近轴线时，轻微向支撑中心吸附，塔搭得直
+			snap = ( rec.kind === 'clay' && d.rec.kind === 'clay' && dx * dx + dz * dz < 0.2 ) ? { x: p.x, z: p.z } : null;
+
+		}
+
+	}
+	return { h: Math.min( Math.max( LIFT_Y, top + cr + 0.1 ), 4.2 ), snap };
+
+}
+
 function dragControl() {
 
 	if ( ! drag || ! drag.rec.alive ) return;
+
+	// 悬浮高度随支撑物平滑升降；对中吸附让堆叠不歪
+	const sup = hoverSupport( drag );
+	drag.target.y += ( sup.h - drag.target.y ) * 0.22;
+	if ( sup.snap ) {
+
+		drag.target.x += ( sup.snap.x - drag.target.x ) * 0.18;
+		drag.target.z += ( sup.snap.z - drag.target.z ) * 0.18;
+
+	}
 
 	const q = drag.targetQuat;
 	b3.b3Body_SetTargetTransform( drag.rec.body, {
@@ -1556,10 +1596,10 @@ function onPointerMove( e ) {
 
 	if ( drag && session.rec ) {
 
-		if ( rayPlaneY( LIFT_Y, _v ) ) {
+		if ( rayPlaneY( drag.target.y, _v ) ) {
 
 			clampPlay( _v, 0.35 );
-			drag.target.set( _v.x, LIFT_Y, _v.z );
+			drag.target.set( _v.x, drag.target.y, _v.z );
 
 		}
 

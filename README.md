@@ -18,6 +18,9 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **Drag clay** — the held piece leaves physics and tracks your finger exactly
   (kinematic carry): it won't snag on things in the way, and it only sticks where you
   drop it. A welded creation swings along and moves as one piece.
+- **Stack by hovering** — a carried piece auto-rises above whatever is under your
+  finger and gently centers over it: drag over a tower, let go, it lands on top,
+  sticks and sets. Towers as tall as the walls allow.
 - **Bring pieces together slowly** — they stick.
 - **Creations hold their pose** — once a build settles for half a second it "sets" like
   real clay and won't tip over, however top-heavy. Touching it softens it again.
