@@ -1872,6 +1872,17 @@ function setupUI() {
 		const btn = document.createElement( 'button' );
 		btn.className = 'color';
 		btn.style.background = '#' + c.toString( 16 ).padStart( 6, '0' );
+		// 手捏的黏土团：每颗形状和歪度都略不同
+		const blobs = [
+			'46% 54% 52% 48% / 52% 44% 56% 48%',
+			'53% 47% 44% 56% / 46% 55% 45% 54%',
+			'48% 52% 55% 45% / 55% 48% 52% 45%',
+			'55% 45% 48% 52% / 47% 53% 47% 53%',
+			'44% 56% 50% 50% / 53% 45% 55% 47%',
+			'51% 49% 56% 44% / 44% 54% 46% 56%',
+		];
+		btn.style.borderRadius = blobs[ i % blobs.length ];
+		btn.style.setProperty( '--rot', [ - 4, 3, - 2, 4, - 3, 2 ][ i % 6 ] + 'deg' );
 		btn.addEventListener( 'pointerdown', ( e ) => {
 
 			reclaimStalePointer( e );
@@ -1891,7 +1902,8 @@ function setupUI() {
 
 	// ● 大小切换：影响之后新加的黏土（和小蛇）
 	const sizeBtn = document.getElementById( 'sizeBtn' );
-	const applySizeBtn = () => { sizeBtn.style.fontSize = [ '13px', '19px', '27px' ][ sizeIndex ]; };
+	const sizeSvg = sizeBtn.querySelector( 'svg' );
+	const applySizeBtn = () => { sizeSvg.style.transform = [ 'scale(0.6)', 'scale(0.85)', 'scale(1.12)' ][ sizeIndex ]; };
 	applySizeBtn();
 	sizeBtn.addEventListener( 'pointerdown', ( e ) => {
 
@@ -2337,32 +2349,77 @@ function noiseBurst( f0, f1, dur, gain ) {
 
 }
 
+// 带 Q 值的带通噪声：湿润的“咕叽”质地
+function bandBurst( f0, f1, dur, gain, q ) {
+
+	if ( ! actx ) return;
+	if ( ! noiseBuffer ) {
+
+		noiseBuffer = actx.createBuffer( 1, actx.sampleRate * 0.2, actx.sampleRate );
+		const data = noiseBuffer.getChannelData( 0 );
+		for ( let i = 0; i < data.length; i ++ ) data[ i ] = Math.random() * 2 - 1;
+
+	}
+	const t = actx.currentTime;
+	const srcN = actx.createBufferSource();
+	srcN.buffer = noiseBuffer;
+	srcN.loop = true;
+	srcN.playbackRate.value = 0.9 + Math.random() * 0.25;
+	const filter = actx.createBiquadFilter();
+	filter.type = 'bandpass';
+	filter.Q.value = q;
+	filter.frequency.setValueAtTime( f0, t );
+	filter.frequency.exponentialRampToValueAtTime( f1, t + dur );
+	const g = actx.createGain();
+	g.gain.setValueAtTime( gain, t );
+	g.gain.exponentialRampToValueAtTime( 0.001, t + dur );
+	srcN.connect( filter ).connect( g ).connect( actx.destination );
+	srcN.start( t );
+	srcN.stop( t + dur + 0.02 );
+
+}
+
+function jitter( v, pct ) {
+
+	return v * ( 1 + ( Math.random() * 2 - 1 ) * pct );
+
+}
+
+// 落下：低频“咚”的肉感 + 短促的“啪”
 function plop() {
 
-	tone( 'sine', 420, 130, 0.12, 0.25 );
-	noiseBurst( 600, 180, 0.09, 0.1 ); // 一点“扑”的厚度
+	tone( 'sine', jitter( 200, 0.15 ), 85, jitter( 0.12, 0.2 ), 0.3 );
+	noiseBurst( jitter( 650, 0.2 ), 180, 0.06, 0.09 );
 
 }
 
+// 弹跳：欢快的上滑 + 一点弹簧尾音
 function boing() {
 
-	tone( 'sine', 200, 520, 0.1, 0.18 );
+	const f1 = jitter( 480, 0.12 );
+	tone( 'sine', 170, f1, 0.11, 0.16 );
+	tone( 'sine', f1, f1 * 0.8, 0.07, 0.06 );
 
 }
 
+// 拆开：湿黏的“啵”
 function pop() {
 
-	tone( 'triangle', 300, 900, 0.08, 0.15 );
+	tone( 'triangle', jitter( 280, 0.15 ), 850, 0.07, 0.13 );
+	bandBurst( 1400, 500, jitter( 0.07, 0.2 ), 0.1, 3 );
 
 }
 
+// 黏合/揉捏：双层带通噪声的“咕叽”+ 低频顿感
 function squish() {
 
 	if ( ! actx ) return;
 	const now = performance.now();
 	if ( now - lastSquishAt < 80 ) return;
 	lastSquishAt = now;
-	noiseBurst( 900, 150, 0.18, 0.18 );
+	bandBurst( jitter( 950, 0.2 ), 240, jitter( 0.16, 0.25 ), 0.2, 2.2 );
+	bandBurst( jitter( 2100, 0.2 ), 600, 0.09, 0.05, 5 );
+	tone( 'sine', jitter( 140, 0.15 ), 70, 0.07, 0.12 );
 
 }
 
