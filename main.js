@@ -954,6 +954,8 @@ function stickyPass() {
 
 			const a = balls[ i ], b = balls[ j ];
 			if ( a.kind !== 'clay' && b.kind !== 'clay' ) continue; // 贴件之间不互黏
+			// 正被拖着的贴件不吸附：先摆到位，松手才贴（否则一碰就焊死没法微调）
+			if ( drag && drag.rec.kind !== 'clay' && ( a === drag.rec || b === drag.rec ) ) continue;
 
 			const key = weldKey( a.id, b.id );
 			if ( weldedKeys.has( key ) ) continue;
@@ -1490,7 +1492,13 @@ function armMorphHold( s ) {
 function endSession() {
 
 	if ( session && session.holdTimer ) clearTimeout( session.holdTimer );
-	if ( session && session.hadPinch && session.rec && session.rec.alive ) clearCooldownsFor( session.rec.id );
+	if ( session && session.rec && session.rec.alive
+		&& ( session.hadPinch || session.rec.kind !== 'clay' ) ) {
+
+		// 捏合过的黏土 / 拖完的贴件：清掉重贴冷却，落点处立即粘住
+		clearCooldownsFor( session.rec.id );
+
+	}
 	session = null;
 	window.removeEventListener( 'pointermove', onPointerMove );
 	window.removeEventListener( 'pointerup', onPointerUp );
@@ -1620,6 +1628,8 @@ function setupPointer() {
 			beginSession( { type: 'ball', rec, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false } );
 			startDrag( rec );
 			if ( rec.kind === 'clay' ) armMorphHold( session );
+			// 抓贴件 = 单独挪贴件（安静地从作品上拆下来）；抓黏土才是搬整团
+			else detach( rec, true );
 
 		} else {
 

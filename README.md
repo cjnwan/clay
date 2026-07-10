@@ -30,6 +30,9 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
   won't overwrite your own save until you start editing.)
 - **Tap a piece** — it hops. **Double-tap** — it pops off whatever it was stuck to.
 - **👀 👄 🎩** — eyes, a smile, a party hat; they stick to clay facing outward.
+  Dragging a decoration moves **just that piece** (it unsticks, follows your finger
+  without snagging, and re-sticks where you drop it); dragging clay moves the whole
+  creation.
 - **🧹** — hold to clear the board.
 
 Works with mouse and touch (pointer events throughout).
