@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Box3D from 'box3d.js/inline';
-import { BODY_TEMPLATES, bakeBodyMesh } from './workshop.js';
+import { BODY_TEMPLATES, bakeBodyMesh, buildWorkshopStage, WORKSHOP_POS } from './workshop.js';
 
 // ---------- 常量 ----------
 
@@ -87,6 +87,16 @@ let session = null;              // 当前指针会话
 let tentative = null;            // 贴件精确放置后的待确认状态 { rec, host, isNew, restore, timer }
 let snapRing = null;             // 表面吸附时的落点指示环（懒创建）
 let confirmBarEl = null;
+let workshop = null;             // 🧸 工坊态：{ tplIndex, colorIndex, yaw, yawVel, bodyMat, figureMesh }
+let wsStage = null;              // 工坊转盘台（懒创建，{ group, figure }）
+let wsKeep = null;               // 离开工坊时留档，再进来还是那只
+let wsDrag = null;               // 工坊里的转盘拖拽 { id, lastX }
+let camBlend = 0;                // 相机混合：0=黏土板 1=工坊
+const boardCamPos = new THREE.Vector3();
+const WS_CAM_OFF = new THREE.Vector3( 0, 2.3, 6.2 );
+const WS_LOOK_OFF = new THREE.Vector3( 0, 1.05, 0 );
+const _wsA = new THREE.Vector3();
+const _wsB = new THREE.Vector3();
 let lastTap = { rec: null, t: 0 };
 let pendingHop = null;           // { rec, timer }：单击的跳跃延迟到双击窗口之后
 let mode = null;                 // 工具模式：null | 'knead' 捏 | 'cut' 剪 | 'paint' 上色
@@ -403,6 +413,7 @@ function frameCamera() {
 	const d = Math.max( 3.9 / halfH, 3.4 / halfV, 11 );
 
 	_v.set( 0, 0.55 + portrait * 0.28, 0.835 - portrait * 0.25 ).normalize().multiplyScalar( d );
+	boardCamPos.copy( _v ); // 供工坊相机混合用
 	camera.position.copy( _v );
 	camera.updateProjectionMatrix();
 	camera.lookAt( 0, 0.7, 0 );
@@ -2134,6 +2145,9 @@ function setupPointer() {
 
 	canvas.addEventListener( 'pointerdown', ( e ) => {
 
+		// 工坊模式：画布输入全部交给工坊（转转盘；Stage 3 起还有部件放置）
+		if ( workshop ) { wsPointerDown( e ); return; }
+
 		reclaimStalePointer( e );
 		if ( session ) {
 
@@ -2303,6 +2317,65 @@ function setupUI() {
 	} );
 
 	selectColor( 0 );
+
+	// 🧸 手办工坊：入口、返回、换身体、转一转、工坊色板
+	document.getElementById( 'wsBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		reclaimStalePointer( e );
+		if ( session ) return;
+		e.preventDefault();
+		ensureAudio();
+		stopDemo();
+		enterWorkshop();
+
+	} );
+	document.getElementById( 'wsBackBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		ensureAudio();
+		exitWorkshop();
+
+	} );
+	document.getElementById( 'wsBodyBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop ) return;
+		ensureAudio();
+		workshop.tplIndex = ( workshop.tplIndex + 1 ) % BODY_TEMPLATES.length;
+		rebuildWsBody();
+
+	} );
+	document.getElementById( 'wsTurnBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop ) return;
+		ensureAudio();
+		workshop.yawVel += 5;
+		boing();
+
+	} );
+	const wsColorRow = document.getElementById( 'wsColorRow' );
+	CLAY_COLORS.forEach( ( c, i ) => {
+
+		const btn = document.createElement( 'button' );
+		btn.className = 'color';
+		btn.style.background = '#' + c.toString( 16 ).padStart( 6, '0' );
+		btn.style.borderRadius = [ '46% 54% 52% 48% / 52% 44% 56% 48%', '53% 47% 44% 56% / 46% 55% 45% 54%', '48% 52% 55% 45% / 55% 48% 52% 45%' ][ i % 3 ];
+		btn.style.setProperty( '--rot', [ - 3, 2, - 2, 3 ][ i % 4 ] + 'deg' );
+		btn.addEventListener( 'pointerdown', ( e ) => {
+
+			e.preventDefault();
+			if ( ! workshop ) return;
+			ensureAudio();
+			workshop.colorIndex = i;
+			if ( workshop.bodyMat ) workshop.bodyMat.color.setHex( CLAY_COLORS[ i ] );
+			selectWsColor( i );
+			dabTick();
+
+		} );
+		wsColorRow.appendChild( btn );
+
+	} );
 
 	// 贴件放置确认气泡：✓ 贴好 / ↺ 放回
 	confirmBarEl = document.getElementById( 'confirmBar' );
@@ -2725,6 +2798,141 @@ const DEMO_RECIPES = [
 	} },
 ];
 
+// ---------- 🧸 手办工坊：转盘台上搭 Q 版手办（无重力、精确放置） ----------
+
+function rebuildWsBody() {
+
+	const w = workshop;
+	if ( ! w || ! wsStage ) return;
+	if ( w.figureMesh ) {
+
+		wsStage.figure.remove( w.figureMesh );
+		w.figureMesh.geometry.dispose();
+
+	}
+	if ( ! w.bodyMat ) {
+
+		w.bodyMat = new THREE.MeshPhysicalMaterial( {
+			color: CLAY_COLORS[ w.colorIndex ],
+			roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
+		} );
+
+	}
+	const { mesh } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat );
+	w.figureMesh = mesh;
+	wsStage.figure.add( mesh );
+	markDirty();
+	plop();
+
+}
+
+function enterWorkshop() {
+
+	if ( workshop ) return;
+	commitTentative();
+	cancelSession();
+	stopDemo();
+	saveScene();
+	if ( ! wsStage ) wsStage = buildWorkshopStage( scene );
+	workshop = wsKeep || { tplIndex: 0, colorIndex: 9, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null };
+	if ( ! workshop.figureMesh ) rebuildWsBody();
+	selectWsColor( workshop.colorIndex );
+	document.getElementById( 'palette' ).classList.add( 'hidden' );
+	document.getElementById( 'workshopBar' ).classList.remove( 'hidden' );
+	setHint( '🧸 手办工坊：拖一拖转圈看 · 点色块换颜色 · 换个身体 · ⬅ 回黏土板' );
+
+}
+
+function exitWorkshop() {
+
+	if ( ! workshop ) return;
+	wsKeep = workshop; // 半成品留着，回来接着捏
+	workshop = null;
+	wsDrag = null;
+	document.getElementById( 'palette' ).classList.remove( 'hidden' );
+	document.getElementById( 'workshopBar' ).classList.add( 'hidden' );
+	resetHint();
+
+}
+
+function selectWsColor( i ) {
+
+	document.querySelectorAll( '#wsColorRow button' ).forEach( ( el, j ) => {
+
+		el.classList.toggle( 'selected', j === i );
+
+	} );
+
+}
+
+// 工坊里的指针：横向拖动 = 转转盘（部件放置在 Stage 3 加入）
+function wsPointerMove( e ) {
+
+	if ( ! wsDrag || e.pointerId !== wsDrag.id || ! workshop ) return;
+	const dx = e.clientX - wsDrag.lastX;
+	wsDrag.lastX = e.clientX;
+	workshop.yaw += dx * 0.011;
+	workshop.yawVel = THREE.MathUtils.clamp( dx * 0.011 * 60, - 8, 8 );
+
+}
+
+function wsPointerUp( e ) {
+
+	if ( ! wsDrag || e.pointerId !== wsDrag.id ) return;
+	wsDrag = null;
+	window.removeEventListener( 'pointermove', wsPointerMove );
+	window.removeEventListener( 'pointerup', wsPointerUp );
+	window.removeEventListener( 'pointercancel', wsPointerUp );
+
+}
+
+function wsPointerDown( e ) {
+
+	ensureAudio();
+	if ( wsDrag ) return;
+	wsDrag = { id: e.pointerId, lastX: e.clientX };
+	window.addEventListener( 'pointermove', wsPointerMove );
+	window.addEventListener( 'pointerup', wsPointerUp );
+	window.addEventListener( 'pointercancel', wsPointerUp );
+
+}
+
+// 每帧的工坊/相机更新（animate 与 __clay.step 共用）
+function frameUpdate( dt ) {
+
+	if ( workshop && wsStage ) {
+
+		if ( ! wsDrag ) {
+
+			workshop.yaw += workshop.yawVel * dt;
+			workshop.yawVel *= Math.pow( 0.03, dt ); // 松手后惯性滑行
+
+		}
+		wsStage.figure.rotation.y = workshop.yaw;
+
+	}
+
+	// 相机在黏土板与工坊之间缓动飞行 = 全屏转场
+	const target = workshop ? 1 : 0;
+	if ( camBlend !== target ) {
+
+		camBlend += Math.sign( target - camBlend ) * Math.min( dt * 1.7, Math.abs( target - camBlend ) );
+		if ( camBlend === 0 ) frameCamera(); // 回到板上，恢复精确机位
+
+	}
+	if ( camBlend > 0 ) {
+
+		const t = camBlend * camBlend * ( 3 - 2 * camBlend ); // smoothstep
+		_wsA.copy( WORKSHOP_POS ).add( WS_CAM_OFF );
+		camera.position.lerpVectors( boardCamPos, _wsA, t );
+		_wsB.copy( WORKSHOP_POS ).add( WS_LOOK_OFF );
+		_wsA.set( 0, 0.7, 0 ).lerp( _wsB, t );
+		camera.lookAt( _wsA );
+
+	}
+
+}
+
 async function startDemo() {
 
 	stopDemo();
@@ -3075,20 +3283,30 @@ function animate() {
 	lastT = now;
 	acc += dt;
 
-	while ( acc >= STEP ) {
+	// 工坊里不推物理（板上作品都定型睡着了），省下整份 CPU
+	if ( workshop ) {
 
-		dragControl();
-		b3.b3World_Step( world, STEP, 4 );
-		stepCount ++;
-		if ( stepCount % 6 === 0 ) stickyPass();
-		if ( stepCount % 15 === 0 ) freezePass();
-		if ( stepCount % 30 === 0 ) rescuePass();
-		acc -= STEP;
+		acc = 0;
+
+	} else {
+
+		while ( acc >= STEP ) {
+
+			dragControl();
+			b3.b3World_Step( world, STEP, 4 );
+			stepCount ++;
+			if ( stepCount % 6 === 0 ) stickyPass();
+			if ( stepCount % 15 === 0 ) freezePass();
+			if ( stepCount % 30 === 0 ) rescuePass();
+			acc -= STEP;
+
+		}
 
 	}
 
 	pumpDemoWaiters();
 	clipCamera();
+	frameUpdate( dt );
 	syncEyes();
 	rebuildClay();
 	renderer.render( scene, camera );
@@ -3159,6 +3377,9 @@ window.__clay = {
 	dump: () => serializeScene(),
 	raw: () => ( { b3, world, effect, balls, FORMS } ),
 	dragInfo: () => ( drag ? { id: drag.rec.id, target: drag.target.toArray(), quat: drag.targetQuat.toArray() } : null ),
+	// 🧸 工坊开关与状态（测试用）
+	ws: () => { workshop ? exitWorkshop() : enterWorkshop(); return ! ! workshop; },
+	wsState: () => ( workshop ? { tpl: workshop.tplIndex, ci: workshop.colorIndex, yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ) } : { blend: + camBlend.toFixed( 2 ) } ),
 	// 工坊 Stage 1 验证：烘焙身体模板并摆到盘中央看效果/耗时
 	bake: ( i = 0, res = 88 ) => {
 
@@ -3197,6 +3418,7 @@ window.__clay = {
 		}
 		pumpDemoWaiters();
 		clipCamera();
+		frameUpdate( n * STEP );
 		syncEyes();
 		markDirty();
 		rebuildClay();

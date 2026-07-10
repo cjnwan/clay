@@ -15,7 +15,7 @@ const SUBTRACT = 12;
 export const BODY_TEMPLATES = [
 	{ name: '圆滚滚', balls: [
 		{ o: [ 0, 0.5, 0 ], r: 0.68 },      // 圆身体
-		{ o: [ 0, 1.44, 0.03 ], r: 0.56 },  // 大脑袋，微微前倾
+		{ o: [ 0, 1.5, 0.03 ], r: 0.56 },   // 大脑袋，微微前倾
 	] },
 	{ name: '高豆子', balls: [
 		{ o: [ 0, 0.42, 0 ], r: 0.52 },
@@ -28,6 +28,34 @@ export const BODY_TEMPLATES = [
 		{ o: [ 0, 1.42, 0.03 ], r: 0.55 },
 	] },
 ];
+
+// 工坊摆在远离黏土板的世界角落：相机飞过去就是全屏转场，主板场景零改动
+export const WORKSHOP_POS = new THREE.Vector3( 100, 0, 0 );
+
+// 转盘台：两层木色圆盘 + 挂身体的图形组（rotation.y = 转盘角）
+export function buildWorkshopStage( scene ) {
+
+	const g = new THREE.Group();
+	g.position.copy( WORKSHOP_POS );
+
+	const base = new THREE.Mesh(
+		new THREE.CylinderGeometry( 1.9, 2.15, 0.22, 48 ),
+		new THREE.MeshStandardMaterial( { color: 0xd9b98a, roughness: 0.9 } ) );
+	base.position.y = 0.11;
+	const top = new THREE.Mesh(
+		new THREE.CylinderGeometry( 1.42, 1.5, 0.16, 48 ),
+		new THREE.MeshStandardMaterial( { color: 0xc9a06b, roughness: 0.85 } ) );
+	top.position.y = 0.3;
+	g.add( base, top );
+
+	const figure = new THREE.Group();
+	figure.position.y = 0.38;
+	g.add( figure );
+
+	scene.add( g );
+	return { group: g, figure };
+
+}
 
 // 把模板烘焙成静态 BufferGeometry 网格。
 // 域取紧立方包围盒；域底比最低点略高一点，边界裁切自然给出"坐得平"的压扁底。
