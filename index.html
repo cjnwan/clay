@@ -102,6 +102,12 @@
 
 		#clearBtn.holding { animation: holdfill 0.7s linear forwards; }
 
+		#demoBtn.armed { animation: armedpulse 0.6s ease-in-out infinite alternate; }
+
+		@keyframes armedpulse {
+			to { transform: scale(1.22); box-shadow: 0 0 0 5px #f6d155cc, 0 6px 14px #00000044; }
+		}
+
 		@keyframes holdfill {
 			to { transform: scale(1.28); background: #f6d155; box-shadow: 0 0 0 6px #ffffffaa, 0 6px 14px #00000044; }
 		}

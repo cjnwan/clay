@@ -2112,7 +2112,8 @@ function setupUI() {
 	}
 
 	// 🎬 看表演：游戏自己捏一个造型给你看
-	document.getElementById( 'demoBtn' ).addEventListener( 'pointerdown', ( e ) => {
+	const demoBtn = document.getElementById( 'demoBtn' );
+	demoBtn.addEventListener( 'pointerdown', ( e ) => {
 
 		reclaimStalePointer( e );
 		if ( session ) return;
@@ -2121,16 +2122,24 @@ function setupUI() {
 
 		if ( demoRun ) { stopDemo(); return; }
 
-		// 盘上有作品时，2.5 秒内再点一次才开演（开演会收走作品）
-		if ( balls.length > 4 && performance.now() - demoArmedAt > 2600 ) {
+		// 盘上有作品时需要二次确认（开演会收走作品）：武装 5 秒，期间按钮脉动提示“再点一下”
+		if ( balls.length > 4 && performance.now() > demoArmedAt ) {
 
-			demoArmedAt = performance.now();
+			demoArmedAt = performance.now() + 5000;
+			demoBtn.classList.add( 'armed' );
 			setHint( '再点一下 🎬 开始表演（会收走现在的作品哦）' );
-			setTimeout( () => { if ( ! demoRun ) resetHint(); }, 2600 );
+			setTimeout( () => {
+
+				demoBtn.classList.remove( 'armed' );
+				if ( ! demoRun ) resetHint();
+
+			}, 5000 );
 			return;
 
 		}
 
+		demoBtn.classList.remove( 'armed' );
+		demoArmedAt = 0;
 		startDemo();
 
 	} );
