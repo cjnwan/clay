@@ -62,14 +62,14 @@
 			transform: translateX(-50%);
 			display: flex;
 			justify-content: center;
-			gap: clamp(3px, 0.6vw, 12px);
+			gap: clamp(3px, 0.5vw, 12px);
 			align-items: center;
 			max-width: 100vw;
 			padding: 0 8px;
 		}
 
 		#palette button {
-			width: clamp(28px, 5.8vw, 54px);
+			width: clamp(26px, 5.2vw, 54px);
 			height: auto;
 			aspect-ratio: 1 / 1;
 			border-radius: 50%;
@@ -107,7 +107,7 @@
 		}
 
 		@media (pointer: coarse) {
-			#palette button { width: clamp(32px, 5.8vw, 58px); }
+			#palette button { width: clamp(30px, 5.2vw, 58px); }
 			#hint { bottom: 116px; }
 		}
 
@@ -146,7 +146,7 @@
 	<div id="loading">🥣 和泥中…</div>
 
 	<div id="title">捏黏土<small>three.js + box3d.js</small></div>
-	<div id="hint">点颜色加黏土 · 拖动搬家 · 靠近黏住 · 按住变形 · 拖住时：加一指捏合缩放旋转 · 🤸 翻跟头 · 双击拆开 · ● 大小 · 🐍 小蛇 · 👀👄🎩 装饰 · 🤏 捏 · 🎬 表演 · 🧹 按住清空 · 网址就是分享链接</div>
+	<div id="hint">点颜色加黏土 · 拖动搬家 · 靠近黏住 · 按住变形 · 拖住时：加一指捏合缩放旋转 · 🤸 翻跟头 · 双击拆开 · ● 大小 · 🐍 小蛇 · 👀👄🎩 装饰 · 🤏✂️🖌 工具 · 🎬 表演 · 🧹 按住清空 · 网址就是分享链接</div>
 
 	<div id="palette">
 		<button id="sizeBtn" title="大小"><svg viewBox="0 0 44 44"><circle cx="22" cy="23" r="10" fill="#b98a5a" stroke="#6b4a2b" stroke-width="3"/><circle cx="18.5" cy="19" r="2.6" fill="#e8cfa8" opacity="0.85"/></svg></button>
@@ -155,6 +155,8 @@
 		<button id="mouthBtn" title="嘴巴"><svg viewBox="0 0 44 44"><path d="M8,18 Q22,38 36,18 Q29,25 22,25 Q15,25 8,18 Z" fill="#c94f43" stroke="#8c3428" stroke-width="2.6" stroke-linejoin="round"/><path d="M15,26.5 Q22,31 29,26.5" fill="none" stroke="#8c3428" stroke-width="2" stroke-linecap="round"/></svg></button>
 		<button id="hatBtn" title="帽子"><svg viewBox="0 0 44 44"><path d="M22,7 Q26,16 32,29 L12,29 Q18,16 22,7 Z" fill="#e0584b" stroke="#a53d33" stroke-width="2.6" stroke-linejoin="round"/><ellipse cx="22" cy="30" rx="14" ry="4.5" fill="#f0b64e" stroke="#b9822e" stroke-width="2.4"/><circle cx="22" cy="7" r="4" fill="#f0b64e" stroke="#b9822e" stroke-width="2.2"/></svg></button>
 		<button id="flipBtn" title="翻跟头（拖住时点）"><svg viewBox="0 0 44 44"><path d="M11,29 A12.5,12.5 0 1 1 30,31" fill="none" stroke="#6b4a2b" stroke-width="4" stroke-linecap="round"/><path d="M33,25 L31,36 L23,29 Z" fill="#6b4a2b"/><circle cx="14" cy="35" r="4.5" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.2"/></svg></button>
+		<button id="cutBtn" title="剪刀：点一下剪成两半"><svg viewBox="0 0 44 44"><path d="M10,8 L30,32" stroke="#8a9aa8" stroke-width="3.6" stroke-linecap="round"/><path d="M30,8 L10,32" stroke="#b8c4cc" stroke-width="3.6" stroke-linecap="round"/><circle cx="8" cy="36" r="4.5" fill="none" stroke="#c94f43" stroke-width="3"/><circle cx="32" cy="36" r="4.5" fill="none" stroke="#c94f43" stroke-width="3"/><circle cx="20" cy="20" r="2" fill="#6b4a2b"/></svg></button>
+		<button id="paintBtn" title="上色：选个颜色点一点"><svg viewBox="0 0 44 44"><path d="M30,6 L14,26" stroke="#8a5a33" stroke-width="4.2" stroke-linecap="round"/><path d="M14,26 Q8,28 7,35 Q13,36 16,31 Q18,28 14,26 Z" fill="#e8a878" stroke="#b97a4e" stroke-width="2"/><circle cx="33" cy="10" r="4" fill="#e0584b" opacity="0.9"/><circle cx="27" cy="35" r="3" fill="#53a7dd" opacity="0.9"/><circle cx="37" cy="24" r="2.6" fill="#7dbb5f" opacity="0.9"/></svg></button>
 		<button id="kneadBtn" title="捏一捏"><svg viewBox="0 0 44 44"><path d="M6,13 Q20,6 31,15" fill="none" stroke="#e8a878" stroke-width="6" stroke-linecap="round"/><path d="M6,32 Q20,38 31,27" fill="none" stroke="#e8a878" stroke-width="6" stroke-linecap="round"/><circle cx="35.5" cy="21" r="5" fill="#c94f43" stroke="#8c3428" stroke-width="2.2"/></svg></button>
 		<button id="demoBtn" title="看表演"><svg viewBox="0 0 44 44"><path d="M10,36 L26,18" stroke="#8a5a33" stroke-width="4.5" stroke-linecap="round"/><path d="M30,5 L32.2,11.5 L39,14 L32.2,16.5 L30,23 L27.8,16.5 L21,14 L27.8,11.5 Z" fill="#f6d155" stroke="#c9a02e" stroke-width="1.8" stroke-linejoin="round"/><path d="M14,17 l0,5 m-2.5,-2.5 l5,0" stroke="#f0b64e" stroke-width="2" stroke-linecap="round"/><path d="M36,29 l0,4 m-2,-2 l4,0" stroke="#f0b64e" stroke-width="2" stroke-linecap="round"/></svg></button>
 		<button id="clearBtn" title="收拾干净（按住）"><svg viewBox="0 0 44 44"><path d="M29,5 L20,22" stroke="#8a5a33" stroke-width="4.2" stroke-linecap="round"/><path d="M20,22 L10,37 M21.5,23.5 L16,38 M23,24 L22,39 M24.5,23.5 L28,37" stroke="#d9a75a" stroke-width="3.4" stroke-linecap="round"/><path d="M17.5,20 L26,24" stroke="#b9822e" stroke-width="3.6" stroke-linecap="round"/></svg></button>

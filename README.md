@@ -30,6 +30,11 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **🤏 knead mode** — toggle it, then press and drag on clay to poke dents and carve
   grooves; going over the same spot again digs deeper. A quick press-and-pull off the
   surface raises a bump. Toggle again to go back to dragging.
+- **✂️ scissors** — tap a piece to cut it in two (each 80% size, same form and color);
+  snip a snake segment to sever the chain. Too-small pieces refuse the cut.
+- **🖌 paint** — pick a color, then tap or stroke on clay to smear it on like pressed
+  bits of colored clay: blush cheeks, spots, frosting. Soft watercolor blends, saved
+  and shared with the creation.
 - **Pinch while dragging** — hold a piece with one finger, put a second finger down:
   spread/close to resize it, twist to rotate. It re-sticks to its neighbours on release.
 - **🤸 flip** — while holding a piece, tap 🤸 with your other hand: it tumbles 90° about
