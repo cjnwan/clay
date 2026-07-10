@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<title>渲染对比：Marching Cubes vs SDF Raymarching</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		html, body { height: 100%; overflow: hidden; background: #efe0c8; font-family: ui-rounded, "PingFang SC", system-ui, sans-serif; }
+		#wrap { display: flex; height: 100%; }
+		.side { position: relative; flex: 1; min-width: 0; }
+		.side canvas { display: block; width: 100%; height: 100%; }
+		.side + .side { border-left: 3px solid #c9a26a; }
+		.tag {
+			position: absolute; top: 12px; left: 12px; z-index: 2;
+			background: #7a5a36; color: #fff4e0; padding: 6px 12px; border-radius: 10px;
+			font-size: 14px; font-weight: 700; letter-spacing: 1px; pointer-events: none;
+		}
+		.stat {
+			position: absolute; top: 46px; left: 12px; z-index: 2;
+			background: #ffffffcc; color: #6b4a2b; padding: 4px 10px; border-radius: 8px;
+			font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; white-space: pre-line;
+		}
+		#note {
+			position: fixed; bottom: 10px; width: 100%; text-align: center; z-index: 2;
+			color: #8a6a44; font-size: 12px; pointer-events: none; padding: 0 12px;
+		}
+	</style>
+</head>
+<body>
+
+	<div id="wrap">
+		<div class="side" id="leftSide">
+			<div class="tag">Marching Cubes（现在）</div>
+			<div class="stat" id="statL">…</div>
+		</div>
+		<div class="side" id="rightSide">
+			<div class="tag">SDF Raymarching（方案）</div>
+			<div class="stat" id="statR">…</div>
+		</div>
+	</div>
+	<div id="note">同一份场景与动画 · 左侧为线上游戏同等采样密度 · 场景含 MC 表达不了的细节：指纹坑 / 薄片 / 碎屑 · 点任一侧可单独测帧率</div>
+
+	<script type="importmap">
+		{
+			"imports": {
+				"three": "./vendor/three.module.js",
+				"three/addons/": "./vendor/addons/"
+			}
+		}
+	</script>
+
+	<script type="module">
+		import * as THREE from 'three';
+		import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+
+		// ---------- 共享场景：与游戏同一套“件”的语义 ----------
+		// type: 0 球 / 1 扁饼 / 2 香肠 / 3 方砖 / 4 薄片（MC 做不到）
+		const PIECES = [
+			{ type: 0, k: 1.25, color: 0xe0584b, base: [ - 1.1, 0.78, - 0.35 ], yaw: 0 },          // 大红球（带指纹与笑脸坑）
+			{ type: 0, k: 0.9, color: 0x53a7dd, base: [ - 0.15, 0.56, 0.95 ], yaw: 0, osc: - 1 }, // 蓝黄一对：反复黏合/分离
+			{ type: 0, k: 0.9, color: 0xf6d155, base: [ - 0.15, 0.56, 0.95 ], yaw: 0, osc: 1 },
+			{ type: 1, k: 1, color: 0x7dbb5f, base: [ 0.2, 0.26, - 1.2 ], yaw: 0.4 },             // 绿扁饼
+			{ type: 2, k: 1, color: 0xa06bc9, base: [ 1.2, 0.44, - 0.55 ], yaw: 0, spin: 0.35 },  // 紫香肠（慢转）
+			{ type: 3, k: 1, color: 0xf2a34d, base: [ 1.35, 0.3, 0.8 ], yaw: 0.5, spin: - 0.22 }, // 橙方砖
+			{ type: 4, k: 1, color: 0xef8fb0, base: [ - 0.45, 0.37, 0.25 ], yaw: 0.5 },           // 粉薄片（竖立）
+			{ type: 0, k: 0.2, color: 0xf6d155, base: [ 0.55, 0.125, 1.25 ], yaw: 0 },            // 碎屑
+			{ type: 0, k: 0.22, color: 0x7dbb5f, base: [ 0.85, 0.135, 1.05 ], yaw: 0 },
+		];
+
+		// 大红球上的坑：两只眼 + 嘴弧 + 顶部一圈“指纹”（r 0.05-0.09，均小于 MC 一格 0.13）
+		const DENTS = [];
+		{
+			const c = PIECES[ 0 ];
+			const R = 0.62 * c.k;
+			const add = ( dir, r, sink ) => {
+				const l = Math.hypot( dir[ 0 ], dir[ 1 ], dir[ 2 ] );
+				DENTS.push( {
+					off: [ dir[ 0 ] / l * ( R - sink ), dir[ 1 ] / l * ( R - sink ), dir[ 2 ] / l * ( R - sink ) ],
+					r,
+				} );
+			};
+			add( [ - 0.3, 0.45, 0.85 ], 0.09, 0.05 );  // 眼
+			add( [ 0.34, 0.45, 0.85 ], 0.09, 0.05 );   // 眼
+			for ( let i = 0; i < 5; i ++ ) {            // 嘴：一排小坑连成弧
+				const a = ( i / 4 - 0.5 ) * 0.9;
+				add( [ Math.sin( a ) * 0.8, - 0.05 - 0.25 * Math.cos( a ) + 0.1, 0.95 ], 0.055, 0.03 );
+			}
+			for ( let i = 0; i < 6; i ++ ) {            // 顶部指纹圈
+				const a = i / 6 * Math.PI * 2;
+				add( [ Math.cos( a ) * 0.35, 1, Math.sin( a ) * 0.35 ], 0.05, 0.02 );
+			}
+		}
+
+		const BG = 0xefe0c8;
+		const FLOOR = 0xefdab3;
+		const MAXP = 14, MAXD = 16;
+
+		// 每帧算出的世界位姿（两侧共用）
+		function pieceAt( p, t ) {
+			const pos = [ ...p.base ];
+			if ( p.osc ) pos[ 0 ] += p.osc * ( 0.55 + 0.45 * Math.sin( t * 0.8 ) );
+			const yaw = p.yaw + ( p.spin ? p.spin * t : 0 );
+			return { pos, yaw };
+		}
+
+		function makeCamera( aspect ) {
+			const cam = new THREE.PerspectiveCamera( 40, aspect, 0.1, 60 );
+			cam.position.set( 0, 4.4, 7.6 );
+			cam.lookAt( 0, 0.45, 0 );
+			return cam;
+		}
+
+		// ================= 左：Marching Cubes（与线上同等采样密度 cell≈0.131） =================
+		const L = { el: document.getElementById( 'leftSide' ) };
+		{
+			L.renderer = new THREE.WebGLRenderer( { antialias: true } );
+			L.renderer.setPixelRatio( Math.min( devicePixelRatio, 2 ) );
+			L.renderer.shadowMap.enabled = true;
+			L.renderer.toneMapping = THREE.NeutralToneMapping;
+			L.el.appendChild( L.renderer.domElement );
+
+			L.scene = new THREE.Scene();
+			L.scene.background = new THREE.Color( BG );
+			L.scene.add( new THREE.HemisphereLight( 0xfff6e8, 0xc9b391, 0.9 ) );
+			const sun = new THREE.DirectionalLight( 0xfff2e0, 2.2 );
+			sun.position.set( 4, 8, 5 );
+			sun.castShadow = true;
+			sun.shadow.mapSize.set( 1024, 1024 );
+			sun.shadow.camera.left = - 4; sun.shadow.camera.right = 4;
+			sun.shadow.camera.top = 4; sun.shadow.camera.bottom = - 4;
+			L.scene.add( sun );
+
+			const floor = new THREE.Mesh(
+				new THREE.CircleGeometry( 12, 48 ).rotateX( - Math.PI / 2 ),
+				new THREE.MeshStandardMaterial( { color: FLOOR, roughness: 0.95 } )
+			);
+			floor.receiveShadow = true;
+			L.scene.add( floor );
+
+			// 场覆盖 [-2.2, 2.2]，格距与线上一致：4.4 / 0.1308 ≈ 34
+			L.FIELD_S = 2.2;
+			const res = Math.round( 4.4 / ( 6.8 / 52 ) );
+			const mat = new THREE.MeshPhysicalMaterial( { roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, vertexColors: true } );
+			L.effect = new MarchingCubes( res, mat, false, true, 120000 );
+			L.effect.position.set( 0, L.FIELD_S - 0.15, 0 );
+			L.effect.scale.set( L.FIELD_S, L.FIELD_S, L.FIELD_S );
+			L.effect.castShadow = true;
+			L.scene.add( L.effect );
+
+			L.SUBTRACT = 12;
+			L.strength = ( r ) => {
+				const rn = r / ( 2 * L.FIELD_S );
+				return rn * rn * ( L.effect.isolation + L.SUBTRACT );
+			};
+			L.addBall = ( x, y, z, s, col ) => {
+				L.effect.addBall(
+					x / ( 2 * L.FIELD_S ) + 0.5,
+					( y + 0.15 ) / ( 2 * L.FIELD_S ),
+					z / ( 2 * L.FIELD_S ) + 0.5,
+					s, L.SUBTRACT, col );
+			};
+			L.colors = PIECES.map( ( p ) => new THREE.Color( p.color ) );
+		}
+
+		// 与游戏 FORMS 相同的子球布局
+		const SUBS = {
+			1: [ [ 0, 0, 0, 0.34 ], ...Array.from( { length: 8 }, ( _, i ) => {
+				const a = i / 8 * Math.PI * 2;
+				return [ Math.cos( a ) * 0.37, 0, Math.sin( a ) * 0.37, 0.29 ];
+			} ) ],
+			2: [ [ - 0.44, 0, 0, 0.4 ], [ 0, 0, 0, 0.44 ], [ 0.44, 0, 0, 0.4 ] ],
+			3: [ [ - 0.22, 0, - 0.22, 0.34 ], [ 0.22, 0, - 0.22, 0.34 ], [ - 0.22, 0, 0.22, 0.34 ], [ 0.22, 0, 0.22, 0.34 ] ],
+			// 薄片：MC 尽力而为——两排半径小于一格的子球（诚实呈现：基本渲染不出来）
+			4: ( () => {
+				const a = [];
+				for ( let i = 0; i < 6; i ++ ) for ( let j = 0; j < 3; j ++ ) a.push( [ ( i / 5 - 0.5 ) * 1.0, ( j / 2 - 0.5 ) * 0.6, 0, 0.06 ] );
+				return a;
+			} )(),
+		};
+
+		function rebuildMC( t ) {
+			const t0 = performance.now();
+			L.effect.reset();
+			PIECES.forEach( ( p, i ) => {
+				const { pos, yaw } = pieceAt( p, t );
+				const col = L.colors[ i ];
+				if ( p.type === 0 ) {
+					L.addBall( pos[ 0 ], pos[ 1 ], pos[ 2 ], L.strength( 0.62 * p.k ), col );
+				} else {
+					const c = Math.cos( yaw ), s = Math.sin( yaw );
+					for ( const sub of SUBS[ p.type ] ) {
+						const x = sub[ 0 ] * p.k, z = sub[ 2 ] * p.k;
+						L.addBall( pos[ 0 ] + c * x + s * z, pos[ 1 ] + sub[ 1 ] * p.k, pos[ 2 ] - s * x + c * z, L.strength( sub[ 3 ] * p.k ), col );
+					}
+				}
+			} );
+			// 坑：负强度（半径低于格距，MC 侧几乎无法呈现——这正是要展示的差距）
+			const rp = pieceAt( PIECES[ 0 ], t );
+			for ( const d of DENTS ) {
+				L.addBall( rp.pos[ 0 ] + d.off[ 0 ], rp.pos[ 1 ] + d.off[ 1 ], rp.pos[ 2 ] + d.off[ 2 ], - L.strength( d.r * 1.7 ), L.colors[ 0 ] );
+			}
+			L.effect.update();
+			return performance.now() - t0;
+		}
+
+		// ================= 右：SDF Raymarching =================
+		const R = { el: document.getElementById( 'rightSide' ) };
+		{
+			R.renderer = new THREE.WebGLRenderer( { antialias: false } );
+			R.renderer.setPixelRatio( Math.min( devicePixelRatio, 2 ) );
+			R.el.appendChild( R.renderer.domElement );
+			R.scene = new THREE.Scene();
+			R.quadCam = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
+
+			R.uniforms = {
+				uCamPos: { value: new THREE.Vector3() },
+				uCamBasis: { value: new THREE.Matrix3() },
+				uTanFov: { value: Math.tan( THREE.MathUtils.degToRad( 20 ) ) },
+				uAspect: { value: 1 },
+				uCount: { value: PIECES.length },
+				uPosK: { value: Array.from( { length: MAXP }, () => new THREE.Vector4() ) },
+				uMeta: { value: Array.from( { length: MAXP }, () => new THREE.Vector4() ) },
+				uCol: { value: Array.from( { length: MAXP }, () => new THREE.Vector3() ) },
+				uDentCount: { value: DENTS.length },
+				uDent: { value: Array.from( { length: MAXD }, () => new THREE.Vector4() ) },
+			};
+			PIECES.forEach( ( p, i ) => {
+				const c = new THREE.Color( p.color ).convertSRGBToLinear();
+				R.uniforms.uCol.value[ i ].set( c.r, c.g, c.b );
+			} );
+
+			const frag = /* glsl */`
+				precision highp float;
+				varying vec2 vUv;
+				uniform vec3 uCamPos;
+				uniform mat3 uCamBasis;
+				uniform float uTanFov, uAspect;
+				uniform int uCount, uDentCount;
+				uniform vec4 uPosK[${MAXP}];
+				uniform vec4 uMeta[${MAXP}];
+				uniform vec3 uCol[${MAXP}];
+				uniform vec4 uDent[${MAXD}];
+
+				float sdSphere( vec3 p, float r ) { return length( p ) - r; }
+				float sdCapX( vec3 p, float h, float r ) { p.x -= clamp( p.x, -h, h ); return length( p ) - r; }
+				float sdRBox( vec3 p, vec3 b, float r ) {
+					vec3 q = abs( p ) - b;
+					return length( max( q, 0. ) ) + min( max( q.x, max( q.y, q.z ) ), 0. ) - r;
+				}
+				float sdDisc( vec3 p, float r, float h, float rr ) {
+					vec2 d = vec2( length( p.xz ) - r, abs( p.y ) - h );
+					return min( max( d.x, d.y ), 0. ) + length( max( d, 0. ) ) - rr;
+				}
+				vec2 rotY( vec2 xz, float a ) {
+					float c = cos( a ), s = sin( a );
+					return vec2( c * xz.x + s * xz.y, - s * xz.x + c * xz.y );
+				}
+
+				// 返回 (颜色, 距离)。地面参与融合：黏土“压”在桌上
+				vec4 map( vec3 p ) {
+					float d = p.y;
+					vec3 col = vec3( 0.862, 0.700, 0.455 ); // 线性空间的地面色
+					for ( int i = 0; i < ${MAXP}; i ++ ) {
+						if ( i >= uCount ) break;
+						float k = uPosK[ i ].w;
+						vec3 q = p - uPosK[ i ].xyz;
+						q.xz = rotY( q.xz, uMeta[ i ].y );
+						q /= k;
+						int t = int( uMeta[ i ].x );
+						float di;
+						if ( t == 0 ) di = sdSphere( q, 0.62 );
+						else if ( t == 1 ) di = sdDisc( q, 0.48, 0.06, 0.16 );
+						else if ( t == 2 ) di = sdCapX( q, 0.42, 0.44 );
+						else if ( t == 3 ) di = sdRBox( q, vec3( 0.3, 0.16, 0.3 ), 0.14 );
+						else di = sdRBox( q, vec3( 0.5, 0.3, 0.012 ), 0.012 );
+						di *= k;
+						float kb = i == 0 ? 0.14 : 0.14;            // 黏土融合半径（smin）
+						if ( d == p.y ) kb = 0.08;                  // 与地面的融合收小，别出深沟
+						float h = clamp( 0.5 + 0.5 * ( d - di ) / kb, 0., 1. );
+						col = mix( col, uCol[ i ], h );
+						d = mix( d, di, h ) - kb * h * ( 1. - h );
+					}
+					for ( int j = 0; j < ${MAXD}; j ++ ) {          // 指纹坑：平滑减法
+						if ( j >= uDentCount ) break;
+						float dd = sdSphere( p - uDent[ j ].xyz, uDent[ j ].w );
+						float kb = 0.045;
+						float h = clamp( 0.5 - 0.5 * ( d + dd ) / kb, 0., 1. );
+						d = mix( d, - dd, h ) + kb * h * ( 1. - h );
+					}
+					return vec4( col, d );
+				}
+
+				float dist( vec3 p ) { return map( p ).w; }
+
+				vec3 calcNormal( vec3 p ) {
+					const vec2 e = vec2( 0.0015, - 0.0015 );
+					return normalize(
+						e.xyy * dist( p + e.xyy ) + e.yyx * dist( p + e.yyx ) +
+						e.yxy * dist( p + e.yxy ) + e.xxx * dist( p + e.xxx ) );
+				}
+
+				float softShadow( vec3 ro, vec3 rd ) {
+					float res = 1.0, t = 0.03;
+					for ( int i = 0; i < 28; i ++ ) {
+						float h = dist( ro + rd * t );
+						res = min( res, 14.0 * h / t );
+						t += clamp( h, 0.015, 0.3 );
+						if ( res < 0.005 || t > 7.0 ) break;
+					}
+					return clamp( res, 0., 1. );
+				}
+
+				float calcAO( vec3 p, vec3 n ) {
+					float occ = 0.0, sca = 1.0;
+					for ( int i = 1; i <= 5; i ++ ) {
+						float h = 0.02 + 0.11 * float( i );
+						occ += ( h - dist( p + n * h ) ) * sca;
+						sca *= 0.72;
+					}
+					return clamp( 1.0 - 1.05 * occ, 0., 1. );
+				}
+
+				void main() {
+					vec2 ndc = vUv * 2.0 - 1.0;
+					vec3 rd = normalize( uCamBasis * vec3( ndc.x * uTanFov * uAspect, ndc.y * uTanFov, - 1.0 ) );
+					vec3 ro = uCamPos;
+
+					float t = 0.0;
+					vec4 hit;
+					bool found = false;
+					for ( int i = 0; i < 110; i ++ ) {
+						vec3 p = ro + rd * t;
+						hit = map( p );
+						if ( hit.w < 0.0012 * max( t, 1.0 ) ) { found = true; break; }
+						t += hit.w * 0.9;
+						if ( t > 26.0 ) break;
+					}
+
+					vec3 bg = mix( vec3( 0.862, 0.744, 0.565 ), vec3( 0.905, 0.808, 0.652 ), clamp( rd.y * 2.0 + 0.4, 0., 1. ) );
+					vec3 col;
+					if ( ! found ) {
+						col = bg;
+					} else {
+						vec3 p = ro + rd * t;
+						vec3 n = calcNormal( p );
+						vec3 alb = hit.rgb;
+						vec3 ld = normalize( vec3( 0.45, 0.8, 0.5 ) );
+						float sh = 0.35 + 0.65 * softShadow( p + n * 0.02, ld );
+						float dif = clamp( dot( n, ld ), 0., 1. ) * sh;
+						float sky = 0.5 + 0.5 * n.y;
+						float ao = calcAO( p, n );
+						float fre = pow( 1.0 - clamp( dot( n, - rd ), 0., 1. ), 3.0 );
+						vec3 h = normalize( ld - rd );
+						float spe = pow( clamp( dot( n, h ), 0., 1. ), 42.0 ) * ( 0.25 + 0.4 * fre ) * dif;
+						col = alb * ( vec3( 1.0, 0.93, 0.82 ) * dif * 1.15 + vec3( 0.62, 0.60, 0.55 ) * sky * ao );
+						col += spe * vec3( 1.0 );
+						col += alb * fre * 0.12 * ao;
+						// 远处融入背景
+						col = mix( col, bg, smoothstep( 9.0, 24.0, t ) );
+					}
+					col = pow( col, vec3( 0.4545 ) );
+					gl_FragColor = vec4( col, 1.0 );
+				}`;
+
+			const vert = /* glsl */`
+				varying vec2 vUv;
+				void main() { vUv = uv; gl_Position = vec4( position.xy, 1.0, 1.0 ); }`;
+
+			R.quad = new THREE.Mesh(
+				new THREE.PlaneGeometry( 2, 2 ),
+				new THREE.ShaderMaterial( { uniforms: R.uniforms, vertexShader: vert, fragmentShader: frag, depthTest: false, depthWrite: false } )
+			);
+			R.scene.add( R.quad );
+		}
+
+		function updateSDF( t, cam ) {
+			R.uniforms.uCamPos.value.copy( cam.position );
+			R.uniforms.uCamBasis.value.setFromMatrix4( cam.matrixWorld );
+			R.uniforms.uAspect.value = cam.aspect;
+			PIECES.forEach( ( p, i ) => {
+				const { pos, yaw } = pieceAt( p, t );
+				R.uniforms.uPosK.value[ i ].set( pos[ 0 ], pos[ 1 ], pos[ 2 ], p.k );
+				R.uniforms.uMeta.value[ i ].set( p.type, yaw, 0, 0 );
+			} );
+			const rp = pieceAt( PIECES[ 0 ], t );
+			DENTS.forEach( ( d, j ) => {
+				R.uniforms.uDent.value[ j ].set( rp.pos[ 0 ] + d.off[ 0 ], rp.pos[ 1 ] + d.off[ 1 ], rp.pos[ 2 ] + d.off[ 2 ], d.r );
+			} );
+		}
+
+		// ---------- 主循环 / 布局 / 单侧独测 ----------
+		let solo = 0; // 0 双侧 1 只左 2 只右
+		document.getElementById( 'leftSide' ).addEventListener( 'pointerdown', () => { solo = solo === 1 ? 0 : 1; layout(); } );
+		document.getElementById( 'rightSide' ).addEventListener( 'pointerdown', () => { solo = solo === 2 ? 0 : 2; layout(); } );
+
+		let camL, camR;
+		function layout() {
+			document.getElementById( 'leftSide' ).style.display = solo === 2 ? 'none' : 'block';
+			document.getElementById( 'rightSide' ).style.display = solo === 1 ? 'none' : 'block';
+			const lw = document.getElementById( 'leftSide' ).clientWidth, lh = innerHeight;
+			const rw = document.getElementById( 'rightSide' ).clientWidth, rh = innerHeight;
+			if ( solo !== 2 ) { L.renderer.setSize( lw, lh ); camL = makeCamera( lw / lh ); }
+			if ( solo !== 1 ) { R.renderer.setSize( rw, rh ); camR = makeCamera( rw / rh ); camR.updateMatrixWorld(); }
+		}
+		layout();
+		window.addEventListener( 'resize', layout );
+
+		const statL = document.getElementById( 'statL' );
+		const statR = document.getElementById( 'statR' );
+		let frames = 0, lastStat = performance.now(), mcMs = 0;
+
+		function orbit( cam, t ) {
+
+			const a = Math.sin( t * 0.12 ) * 0.55;
+			cam.position.set( Math.sin( a ) * 7.6, 4.4, Math.cos( a ) * 7.6 );
+			cam.lookAt( 0, 0.45, 0 );
+			cam.updateMatrixWorld();
+
+		}
+
+		function animate() {
+			const t = performance.now() / 1000;
+			if ( solo !== 2 ) {
+				orbit( camL, t );
+				mcMs += rebuildMC( t );
+				L.renderer.render( L.scene, camL );
+			}
+			if ( solo !== 1 ) {
+				orbit( camR, t );
+				updateSDF( t, camR );
+				R.renderer.render( R.scene, R.quadCam );
+			}
+			frames ++;
+			const now = performance.now();
+			if ( now - lastStat > 500 ) {
+				const fps = ( frames * 1000 / ( now - lastStat ) ).toFixed( 0 );
+				statL.textContent = `FPS ${fps}${solo === 1 ? '（单侧）' : ''}\n场重建 ${( mcMs / frames ).toFixed( 1 )} ms/帧`;
+				statR.textContent = `FPS ${fps}${solo === 2 ? '（单侧）' : ''}\n全屏逐像素步进`;
+				frames = 0; mcMs = 0; lastStat = now;
+			}
+			requestAnimationFrame( animate );
+		}
+		animate();
+	</script>
+
+</body>
+</html>
