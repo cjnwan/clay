@@ -1381,6 +1381,9 @@ function stickyPass() {
 // 物理炸飞 / 穿墙的兜底：掉出世界就放回盘中央
 function rescuePass() {
 
+	// 拖拽中不救援：孩子可能正把整团抱出盘外收走，别半路拆了传送回来
+	if ( drag ) return;
+
 	for ( const rec of balls ) {
 
 		if ( rec.frozen ) continue;
@@ -1961,7 +1964,26 @@ function onPointerMove( e ) {
 
 		if ( rayPlaneY( drag.target.y, _v ) ) {
 
-			clampPlay( _v, 0.35 );
+			// 拖出盘外 = 要收走：跟手出盘，出界松手删除（和工坊"拖离身体收回"同一个动作）
+			const rOut = Math.hypot( _v.x, _v.z );
+			const out = rOut > BOARD_HALF + 0.45;
+			if ( out !== !! drag.out ) {
+
+				drag.out = out;
+				setHint( out ? '🧹 松手就收走啦' : '' );
+				if ( ! out ) resetHint();
+
+			}
+			if ( out ) {
+
+				const lim = BOARD_HALF + 1.6;
+				if ( rOut > lim ) { const s = lim / rOut; _v.x *= s; _v.z *= s; }
+
+			} else {
+
+				clampPlay( _v, 0.35 );
+
+			}
 			drag.target.set( _v.x, drag.target.y, _v.z );
 
 		}
@@ -2016,8 +2038,18 @@ function onPointerUp( e ) {
 
 		}
 
+		// 拖出盘外松手：拿着的整团收走（单件删除的出口，和工坊"拖离身体收回"一致）
+		if ( drag && drag.out && session.moved && drag.rec.alive ) {
+
+			const cluster = connectedOf( drag.rec, true );
+			drag = null;
+			for ( const r of cluster ) removePiece( r );
+			hideSnapRing();
+			pop();
+			resetHint();
+
 		// 拖着贴件在黏土表面上松手：进入待确认（✓ 贴好 / ↺ 放回），而不是掉下去
-		if ( drag && drag.rec.kind !== 'clay' && drag.surface && session.moved && drag.rec.alive ) {
+		} else if ( drag && drag.rec.kind !== 'clay' && drag.surface && session.moved && drag.rec.alive ) {
 
 			enterTentative( drag.rec, session, drag.surface );
 			drag = null;
@@ -3110,7 +3142,7 @@ function enterWorkshop() {
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
 	document.getElementById( 'workshopBar' ).classList.remove( 'hidden' );
 	document.body.classList.add( 'ws' );
-	setHint( '🧸 手办工坊：货架上拖个部件按上去 · 拖一拖转圈看 · 点色块换颜色 · ⬅ 回黏土板' );
+	setHint( '🧸 手办工坊：货架拖部件按上去 · 点已放的部件拿起重放，拖离身体就收回 · 空白处拖动转圈 · ⬅ 回黏土板' );
 
 }
 
