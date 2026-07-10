@@ -2393,15 +2393,74 @@ function setupUI() {
 		exitWorkshop();
 
 	} );
-	document.getElementById( 'wsBodyBtn' ).addEventListener( 'pointerdown', ( e ) => {
+	// R3 分段 tab：形状 / 雕刻 / 装扮（主题色即模式）
+	document.querySelectorAll( '#wsTabs button' ).forEach( ( btn ) => {
+
+		btn.addEventListener( 'pointerdown', ( e ) => {
+
+			e.preventDefault();
+			if ( ! workshop ) return;
+			ensureAudio();
+			setWsTab( btn.dataset.tab );
+			dabTick();
+
+		} );
+
+	} );
+
+	// 形状行：换基础形（保色、清雕刻、按现有逻辑处理头套）
+	document.querySelectorAll( '#wsShapeRow button' ).forEach( ( btn ) => {
+
+		btn.addEventListener( 'pointerdown', ( e ) => {
+
+			e.preventDefault();
+			if ( ! workshop ) return;
+			ensureAudio();
+			const i = btn.dataset.shape | 0;
+			if ( i === workshop.tplIndex ) return;
+			workshop.tplIndex = i;
+			workshop.sculpt = []; // 新泥胚从平整开始
+			workshop.sculptOps = [];
+			rebuildWsBody();
+			selectWsShape( i );
+			plop();
+
+		} );
+
+	} );
+
+	// 雕刻行：戳坑/鼓包二选一 + 笔刷三档 + 撤销
+	const dentBtn = document.getElementById( 'wsDentBtn' );
+	const bumpBtn = document.getElementById( 'wsBumpBtn' );
+	const setSculptTool = ( type ) => {
+
+		if ( ! workshop ) return;
+		workshop.sculptToolType = type;
+		if ( workshop.tab === 'sculpt' ) workshop.sculptTool = type;
+		dentBtn.classList.toggle( 'selected', type === - 1 );
+		bumpBtn.classList.toggle( 'selected', type === 1 );
+
+	};
+	dentBtn.addEventListener( 'pointerdown', ( e ) => { e.preventDefault(); ensureAudio(); setSculptTool( - 1 ); } );
+	bumpBtn.addEventListener( 'pointerdown', ( e ) => { e.preventDefault(); ensureAudio(); setSculptTool( 1 ); } );
+	const brushBtn = document.getElementById( 'wsBrushBtn' );
+	const brushSvg = brushBtn.querySelector( 'svg' );
+	brushBtn.addEventListener( 'pointerdown', ( e ) => {
 
 		e.preventDefault();
 		if ( ! workshop ) return;
 		ensureAudio();
-		workshop.tplIndex = ( workshop.tplIndex + 1 ) % BODY_TEMPLATES.length;
-		workshop.sculpt = []; // 新形状从平整开始（跟黏土板"变形抹平旧坑"一致）
-		rebuildWsBody();
-		plop();
+		workshop.brush = ( ( workshop.brush === undefined ? 1 : workshop.brush ) + 1 ) % 3;
+		brushSvg.style.transform = [ 'scale(0.6)', 'scale(0.85)', 'scale(1.12)' ][ workshop.brush ];
+		boing();
+
+	} );
+	document.getElementById( 'wsUndoBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop ) return;
+		ensureAudio();
+		wsUndoSculpt();
 
 	} );
 	document.getElementById( 'wsTurnBtn' ).addEventListener( 'pointerdown', ( e ) => {
@@ -2988,21 +3047,137 @@ function rebuildWsBody( keepFitted ) {
 
 }
 
-// 雕刻：往当前身体的配方里加一颗正/负小球再重烘焙（~50ms，无感）。
-// 命中来自 wsSurfaceHit；坑心压进表面一点才咬得动，包心悬出一点才鼓得起来
+// 雕刻：往当前身体的配方里加正/负小球再重烘焙（~25-50ms）。
+// 单点=戳一下；拖动=沿表面每隔一小段采样成沟/棱（拖动中只放预览珠，松手一次烘焙）。
+// 一次按-划-抬 = 一个笔画 = 一个撤销单元
+const MAX_SCULPT = 48;
+const BRUSH_R = [ 0.2, 0.3, 0.42 ]; // ⭕ 笔刷三档
+
+function sculptBallFrom( hit, type ) {
+
+	const r = BRUSH_R[ workshop.brush === undefined ? 1 : workshop.brush ];
+	// 坑心压进表面一点才咬得动，包心悬出一点才鼓得起来（随笔刷等比）
+	const off = type === 1 ? r * 0.66 : r * 0.53;
+	return [
+		hit.lp.x + hit.ln.x * ( type === 1 ? off : - off ),
+		hit.lp.y + hit.ln.y * ( type === 1 ? off : - off ),
+		hit.lp.z + hit.ln.z * ( type === 1 ? off : - off ),
+		type, r ];
+
+}
+
+function wsPushSculpt( hit, type ) {
+
+	if ( ! workshop.sculpt ) workshop.sculpt = [];
+	if ( workshop.sculpt.length >= MAX_SCULPT ) { shakePalette(); return 0; }
+	const b = sculptBallFrom( hit, type );
+	workshop.sculpt.push( b );
+	let n = 1;
+	if ( Math.abs( hit.lp.x ) > 0.12 && workshop.sculpt.length < MAX_SCULPT ) {
+
+		workshop.sculpt.push( [ - b[ 0 ], b[ 1 ], b[ 2 ], type, b[ 4 ] ] ); // 左右对称，跟部件一致
+		n = 2;
+
+	}
+	return n;
+
+}
+
+// 单点雕刻（也是调试钩子的入口）
 function wsSculptAt( hit, type ) {
 
 	if ( ! workshop ) return;
-	if ( ! workshop.sculpt ) workshop.sculpt = [];
-	const off = type === 1 ? 0.2 : 0.16;
-	const px = hit.lp.x + hit.ln.x * ( type === 1 ? off : - off );
-	const py = hit.lp.y + hit.ln.y * ( type === 1 ? off : - off );
-	const pz = hit.lp.z + hit.ln.z * ( type === 1 ? off : - off );
-	workshop.sculpt.push( [ px, py, pz, type ] );
-	if ( Math.abs( hit.lp.x ) > 0.12 ) workshop.sculpt.push( [ - px, py, pz, type ] ); // 左右对称，跟部件一致
-	while ( workshop.sculpt.length > 28 ) workshop.sculpt.shift();
+	const n = wsPushSculpt( hit, type );
+	if ( ! n ) return;
+	if ( ! workshop.sculptOps ) workshop.sculptOps = [];
+	workshop.sculptOps.push( n );
 	rebuildWsBody( true );
 	if ( type === 1 ) boing(); else squish();
+
+}
+
+// 雕刻拖动会话：沿途放半透明预览珠（挖=深色 / 加=亮色），松手一次性烘焙
+let wsSculptDrag = null; // { id, type, count, lastLp, beads }
+let _beadGeo = null, _beadMatDent = null, _beadMatBump = null;
+
+function wsAddBead( hit, mirrored ) {
+
+	if ( ! _beadGeo ) {
+
+		_beadGeo = new THREE.SphereGeometry( 0.075, 8, 6 );
+		_beadMatDent = new THREE.MeshBasicMaterial( { color: 0x6b4a2b, transparent: true, opacity: 0.45, depthWrite: false } );
+		_beadMatBump = new THREE.MeshBasicMaterial( { color: 0xfff4d6, transparent: true, opacity: 0.6, depthWrite: false } );
+
+	}
+	const m = new THREE.Mesh( _beadGeo, wsSculptDrag.type === 1 ? _beadMatBump : _beadMatDent );
+	m.scale.setScalar( BRUSH_R[ workshop.brush === undefined ? 1 : workshop.brush ] / 0.3 ); // 珠子大小跟笔刷档
+	m.position.set( mirrored ? - hit.lp.x : hit.lp.x, hit.lp.y, hit.lp.z );
+	wsStage.figure.add( m );
+	wsSculptDrag.beads.push( m );
+
+}
+
+function wsSculptPointerMove( e ) {
+
+	if ( ! wsSculptDrag || e.pointerId !== wsSculptDrag.id || ! workshop ) return;
+	setRay( e );
+	const hit = wsSurfaceHit();
+	if ( ! hit ) return;
+	if ( wsSculptDrag.lastLp && hit.lp.distanceTo( wsSculptDrag.lastLp ) < 0.18 ) return;
+	wsSculptDrag.lastLp = hit.lp.clone();
+	const n = wsPushSculpt( hit, wsSculptDrag.type );
+	if ( ! n ) return;
+	wsSculptDrag.count += n;
+	wsAddBead( hit, false );
+	if ( n === 2 ) wsAddBead( hit, true );
+	dabTick();
+
+}
+
+function wsSculptPointerUp( e ) {
+
+	if ( ! wsSculptDrag || e.pointerId !== wsSculptDrag.id ) return;
+	const d = wsSculptDrag;
+	wsSculptDrag = null;
+	window.removeEventListener( 'pointermove', wsSculptPointerMove );
+	window.removeEventListener( 'pointerup', wsSculptPointerUp );
+	window.removeEventListener( 'pointercancel', wsSculptPointerUp );
+	for ( const b of d.beads ) wsStage.figure.remove( b );
+	if ( d.count && workshop ) {
+
+		( workshop.sculptOps = workshop.sculptOps || [] ).push( d.count );
+		rebuildWsBody( true );
+		if ( d.type === 1 ) boing(); else squish();
+
+	}
+
+}
+
+function beginWsSculpt( e, hit ) {
+
+	wsSculptDrag = { id: e.pointerId, type: workshop.sculptTool, count: 0, lastLp: hit.lp.clone(), beads: [] };
+	const n = wsPushSculpt( hit, wsSculptDrag.type );
+	if ( n ) {
+
+		wsSculptDrag.count = n;
+		wsAddBead( hit, false );
+		if ( n === 2 ) wsAddBead( hit, true );
+
+	}
+	window.addEventListener( 'pointermove', wsSculptPointerMove );
+	window.addEventListener( 'pointerup', wsSculptPointerUp );
+	window.addEventListener( 'pointercancel', wsSculptPointerUp );
+
+}
+
+// 按笔画撤销：弹出最后一笔的所有雕刻球并重烘焙
+function wsUndoSculpt() {
+
+	if ( ! workshop || ! workshop.sculptOps || ! workshop.sculptOps.length ) return;
+	const n = workshop.sculptOps.pop();
+	workshop.sculpt.length = Math.max( 0, workshop.sculpt.length - n );
+	rebuildWsBody( true );
+	pop();
 
 }
 
@@ -3023,7 +3198,7 @@ function wsFigData( w ) {
 			ln: [ r3( en.ln.x ), r3( en.ln.y ), r3( en.ln.z ) ],
 		} ) ),
 	};
-	if ( w.sculpt && w.sculpt.length ) fd.s = w.sculpt.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 1 ? 1 : - 1 ] );
+	if ( w.sculpt && w.sculpt.length ) fd.s = w.sculpt.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 1 ? 1 : - 1, r3( d[ 4 ] || 0.3 ) ] );
 	return fd;
 
 }
@@ -3031,11 +3206,12 @@ function wsFigData( w ) {
 // 存档里的雕刻列表 → 夹取后的干净副本
 function sanitizeSculpt( s ) {
 
-	return ( Array.isArray( s ) ? s : [] ).slice( 0, 28 ).filter( Array.isArray ).map( ( d ) => [
+	return ( Array.isArray( s ) ? s : [] ).slice( 0, MAX_SCULPT ).filter( Array.isArray ).map( ( d ) => [
 		THREE.MathUtils.clamp( _num( d[ 0 ], 0 ), - 3, 3 ),
 		THREE.MathUtils.clamp( _num( d[ 1 ], 0 ), - 3, 3 ),
 		THREE.MathUtils.clamp( _num( d[ 2 ], 0 ), - 3, 3 ),
-		d[ 3 ] === 1 ? 1 : - 1 ] );
+		d[ 3 ] === 1 ? 1 : - 1,
+		THREE.MathUtils.clamp( _num( d[ 4 ], 0.3 ), 0.08, 0.5 ) ] );
 
 }
 
@@ -3144,7 +3320,8 @@ function createFigure( fd, x, baseY, z ) {
 // 从存档配方还原工坊里的半成品
 function restoreWorkshop( fd ) {
 
-	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: sanitizeSculpt( fd.s ) };
+	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: sanitizeSculpt( fd.s ), sculptOps: [], tab: 'shape', sculptToolType: - 1, brush: 1 };
+	if ( workshop.sculpt.length ) workshop.sculptOps = [ workshop.sculpt.length ]; // 还原后整段算一笔，仍可撤销
 	rebuildWsBody();
 	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
 
@@ -3190,13 +3367,14 @@ function enterWorkshop() {
 		wsSavedData = null;
 
 	}
-	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: [] };
+	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: [], sculptOps: [], tab: 'shape', sculptToolType: - 1, brush: 1 };
 	if ( ! workshop.figureMesh ) rebuildWsBody();
 	selectWsColor( workshop.colorIndex );
+	selectWsShape( workshop.tplIndex );
+	setWsTab( workshop.tab || 'shape' );
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
 	document.getElementById( 'workshopBar' ).classList.remove( 'hidden' );
-	document.body.classList.add( 'ws' );
-	setHint( '🧸 手办工坊：货架拖部件按上去 · 点已放的部件拿起重放，拖离身体就收回 · 空白处拖动转圈 · ⬅ 回黏土板' );
+	document.body.classList.add( 'ws' ); // hint 由 setWsTab 按当前 tab 给
 
 }
 
@@ -3223,6 +3401,44 @@ function selectWsColor( i ) {
 		el.classList.toggle( 'selected', j === i );
 
 	} );
+
+}
+
+function selectWsShape( i ) {
+
+	document.querySelectorAll( '#wsShapeRow button' ).forEach( ( el ) => {
+
+		el.classList.toggle( 'selected', ( el.dataset.shape | 0 ) === i );
+
+	} );
+
+}
+
+const WS_TAB_HINTS = {
+	shape: '🧸 挑个形状开始 · 点色块上色 · 空白处拖动转圈 · 下面切换：雕刻🤏 装扮🎀',
+	sculpt: '🤏 点一下戳坑 · 划一划刻沟 · 🫧 是鼓包 · ⭕ 笔刷大小 · ↩️ 撤销上一笔',
+	deco: '🎀 货架拖部件按上去 · 点已放的拿起重放，拖离身体就收回',
+};
+
+// 切 tab：R2 内容行与主题色跟着换；离开装扮清上膛，进雕刻握起工具
+function setWsTab( t ) {
+
+	if ( ! workshop ) return;
+	workshop.tab = t;
+	document.getElementById( 'workshopBar' ).dataset.tab = t;
+	document.querySelectorAll( '#wsTabs button' ).forEach( ( el ) => {
+
+		el.classList.toggle( 'selected', el.dataset.tab === t );
+
+	} );
+	workshop.sculptTool = t === 'sculpt' ? ( workshop.sculptToolType || - 1 ) : null;
+	if ( t !== 'deco' && workshop.placing ) {
+
+		workshop.placing = null;
+		selectWsShelf( null );
+
+	}
+	setHint( WS_TAB_HINTS[ t ] );
 
 }
 
@@ -3548,6 +3764,14 @@ function wsPointerDown( e ) {
 	}
 	if ( wsDrag ) return;
 	setRay( e );
+
+	// 握着雕刻工具：按在身上=雕（点一下戳，划过去刻沟），按在空白=照常转转盘
+	if ( workshop.sculptTool ) {
+
+		const hit = wsSurfaceHit();
+		if ( hit ) { beginWsSculpt( e, hit ); return; }
+
+	}
 
 	// 货架上膛过：这一按就是放置
 	if ( workshop.placing ) {

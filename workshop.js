@@ -275,14 +275,13 @@ export function bakeBodyMesh( template, material, res = 88, sculpt = null ) {
 
 	for ( const b of template.balls ) addBall( b.o[ 0 ], b.o[ 1 ], b.o[ 2 ], strengthFor( b.r ) );
 
-	// 雕刻球：坐标是烘焙后局部系（底在 y=0），换回模板系加 y0；手感与黏土板一致
+	// 雕刻球：坐标是烘焙后局部系（底在 y=0），换回模板系加 y0；d[4]=笔刷半径（缺省沿用板上手感）
 	if ( sculpt ) {
 
-		const dentS = strengthFor( DENT_R );
-		const bumpS = strengthFor( DENT_R * 0.85 );
 		for ( const d of sculpt ) {
 
-			addBall( d[ 0 ], d[ 1 ] + y0, d[ 2 ], d[ 3 ] === 1 ? bumpS : - dentS );
+			const rr = ( typeof d[ 4 ] === 'number' && isFinite( d[ 4 ] ) ) ? Math.min( Math.max( d[ 4 ], 0.08 ), 0.5 ) : DENT_R;
+			addBall( d[ 0 ], d[ 1 ] + y0, d[ 2 ], d[ 3 ] === 1 ? strengthFor( rr * 0.85 ) : - strengthFor( rr ) );
 
 		}
 

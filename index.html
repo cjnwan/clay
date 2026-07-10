@@ -135,6 +135,37 @@
 		/* 工坊条有三行，提示文字上移别被挡住 */
 		body.ws #hint { bottom: 224px; }
 
+		/* 工坊 tab：R2 内容行随 data-tab 切换；主题色 = 模式（形状蓝/雕刻橙/装扮粉） */
+		#workshopBar .wsrow { display: none; border-radius: 20px; padding: 5px 10px; }
+		#workshopBar[data-tab="shape"] #wsShapeRow { display: flex; background: #7dbbe022; }
+		#workshopBar[data-tab="sculpt"] #wsSculptRow { display: flex; background: #e8a05c2c; }
+		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: #f2a7c42a; }
+		#workshopBar[data-tab="sculpt"] #wsColorRow { opacity: 0.45; }
+
+		/* 分段 tab 控件：相连胶囊，和圆形动作钮长得明显不同 */
+		#wsTabs {
+			display: flex;
+			background: #ffffff;
+			border-radius: 999px;
+			padding: 3px;
+			box-shadow: 0 4px 10px #00000033, inset 0 -4px 6px #00000014;
+			gap: 2px;
+		}
+
+		#workshopBar #wsTabs button {
+			border: none;
+			border-radius: 999px;
+			background: transparent;
+			box-shadow: none;
+			transform: none;
+			width: clamp(34px, 6vw, 56px);
+		}
+
+		#workshopBar #wsTabs button.selected { transform: none; }
+		#workshopBar[data-tab="shape"] #wsTabs button[data-tab="shape"] { background: #7dbbe055; box-shadow: inset 0 2px 4px #4a7da533; }
+		#workshopBar[data-tab="sculpt"] #wsTabs button[data-tab="sculpt"] { background: #e8a05c55; box-shadow: inset 0 2px 4px #b06f3333; }
+		#workshopBar[data-tab="deco"] #wsTabs button[data-tab="deco"] { background: #f2a7c455; box-shadow: inset 0 2px 4px #b26e8d33; }
+
 		#palette.shake { animation: shake 0.3s; }
 
 		@keyframes shake {
@@ -222,10 +253,26 @@
 		</div>
 	</div>
 
-	<!-- 手办工坊的工具条：进工坊时替换调色盘 -->
-	<div id="workshopBar" class="hidden">
+	<!-- 手办工坊的工具条：进工坊时替换调色盘。R2 内容行随 R3 的 tab 切换 -->
+	<div id="workshopBar" class="hidden" data-tab="shape">
 		<div class="prow" id="wsColorRow"></div>
-		<div class="prow" id="wsPartRow">
+		<div class="prow wsrow" id="wsShapeRow">
+			<button data-shape="0" title="圆滚滚小人"><svg viewBox="0 0 44 44"><circle cx="22" cy="14" r="8" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/><circle cx="22" cy="30" r="10.5" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/></svg></button>
+			<button data-shape="1" title="高豆子"><svg viewBox="0 0 44 44"><ellipse cx="22" cy="22" rx="8.5" ry="16" fill="#a8c686" stroke="#6d8a4e" stroke-width="2.4"/></svg></button>
+			<button data-shape="2" title="鼓肚子"><svg viewBox="0 0 44 44"><circle cx="22" cy="13" r="7.5" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/><ellipse cx="22" cy="29" rx="11" ry="10" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/><ellipse cx="22" cy="31" rx="6" ry="4.5" fill="#f4d4b5"/></svg></button>
+			<button data-shape="3" title="圆球"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="13" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.6"/><circle cx="17" cy="17" r="3.5" fill="#ffffff" opacity="0.6"/></svg></button>
+			<button data-shape="4" title="蛋蛋"><svg viewBox="0 0 44 44"><path d="M22,6 Q33,16 33,27 A11,11 0 1 1 11,27 Q11,16 22,6 Z" fill="#f2e0c2" stroke="#c4ad8a" stroke-width="2.6"/></svg></button>
+			<button data-shape="5" title="扁饼"><svg viewBox="0 0 44 44"><ellipse cx="22" cy="24" rx="15" ry="8" fill="#f6d155" stroke="#b9982e" stroke-width="2.6"/><ellipse cx="22" cy="21" rx="15" ry="7" fill="#fce38a" stroke="#b9982e" stroke-width="2"/></svg></button>
+			<button data-shape="6" title="香肠"><svg viewBox="0 0 44 44"><rect x="6" y="16" width="32" height="13" rx="6.5" fill="#e0937b" stroke="#a55e49" stroke-width="2.6"/></svg></button>
+			<button data-shape="7" title="方砖"><svg viewBox="0 0 44 44"><rect x="9" y="12" width="26" height="21" rx="4" fill="#c9856a" stroke="#8f5540" stroke-width="2.6"/><path d="M9,19 h26 M22,12 v7 M15,19 v14 M29,19 v14" stroke="#8f5540" stroke-width="1.8" opacity="0.6"/></svg></button>
+		</div>
+		<div class="prow wsrow" id="wsSculptRow">
+			<button id="wsDentBtn" title="戳坑：点一下戳、划一划刻沟"><svg viewBox="0 0 44 44"><path d="M30,5 L21,20" stroke="#8a5a33" stroke-width="4.6" stroke-linecap="round"/><path d="M21,20 L17,28" stroke="#c98d52" stroke-width="4" stroke-linecap="round"/><path d="M8,33 Q17,26 26,33 Q17,38 8,33 Z" fill="#e8b28a" stroke="#a06b43" stroke-width="2.2"/></svg></button>
+			<button id="wsBumpBtn" title="鼓包：点一下鼓个包"><svg viewBox="0 0 44 44"><path d="M6,33 Q13,33 15,28 Q18,20 22,20 Q26,20 29,28 Q31,33 38,33" fill="none" stroke="#a06b43" stroke-width="2.6"/><circle cx="22" cy="24" r="6.5" fill="#e8b28a" stroke="#a06b43" stroke-width="2.2"/></svg></button>
+			<button id="wsBrushBtn" title="笔刷大小"><svg viewBox="0 0 44 44"><circle cx="22" cy="23" r="9" fill="#e8a05c" stroke="#b06f33" stroke-width="3"/></svg></button>
+			<button id="wsUndoBtn" title="撤销上一笔"><svg viewBox="0 0 44 44"><path d="M30,10 A12,12 0 1 0 34,26" fill="none" stroke="#8a6a44" stroke-width="4.4" stroke-linecap="round"/><path d="M25,5 L31,10.5 L24,15" fill="none" stroke="#8a6a44" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+		</div>
+		<div class="prow wsrow" id="wsPartRow">
 			<button data-part="hood" title="玩偶服头套：一键穿上，露出小脸"><svg viewBox="0 0 44 44"><path d="M22,5 Q36,5 36,20 Q36,37 22,37 Q8,37 8,20 Q8,5 22,5 Z" fill="#7dbb5f" stroke="#4a7d38" stroke-width="2.6"/><circle cx="22" cy="21" r="9.5" fill="#e8b28a" stroke="#4a7d38" stroke-width="3"/><path d="M11,7 Q8,1 15,3 M33,7 Q36,1 29,3" fill="none" stroke="#4a7d38" stroke-width="3" stroke-linecap="round"/></svg></button>
 			<button data-part="eye" title="眼睛（自动长一对）"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="12" fill="#ffffff" stroke="#6b4a2b" stroke-width="2.8"/><circle cx="24" cy="23.5" r="5.5" fill="#2f2620"/><circle cx="22.5" cy="21" r="1.8" fill="#ffffff"/></svg></button>
 			<button data-part="mouth" title="小嘴巴"><svg viewBox="0 0 44 44"><path d="M8,18 Q14,28 22,20 Q30,28 36,18" fill="none" stroke="#5a4030" stroke-width="4.4" stroke-linecap="round"/></svg></button>
@@ -236,7 +283,11 @@
 		</div>
 		<div class="prow">
 			<button id="wsBackBtn" title="回到黏土板"><svg viewBox="0 0 44 44"><path d="M26,10 L12,22 L26,34" fill="none" stroke="#6b4a2b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="31" cy="22" rx="6" ry="9" fill="#d9a75a" stroke="#b9822e" stroke-width="2.4"/></svg></button>
-			<button id="wsBodyBtn" title="换个身体"><svg viewBox="0 0 44 44"><circle cx="13" cy="14" r="7" fill="#f2a7c4" stroke="#b26e8d" stroke-width="2.4"/><path d="M6,36 Q6,25 13,25 Q20,25 20,36 Z" fill="#f2a7c4" stroke="#b26e8d" stroke-width="2.4" stroke-linejoin="round"/><circle cx="32" cy="12" r="5.5" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.4"/><path d="M26,36 Q26,20 32,20 Q38,20 38,36 Z" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.4" stroke-linejoin="round"/></svg></button>
+			<span id="wsTabs">
+				<button data-tab="shape" class="selected" title="形状"><svg viewBox="0 0 44 44"><circle cx="16" cy="17" r="9" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.4"/><rect x="22" y="22" width="15" height="13" rx="3" fill="#a8c686" stroke="#6d8a4e" stroke-width="2.4"/></svg></button>
+				<button data-tab="sculpt" title="雕刻"><svg viewBox="0 0 44 44"><path d="M31,6 L20,22" stroke="#8a5a33" stroke-width="4.4" stroke-linecap="round"/><path d="M9,34 Q19,27 29,34 Q19,39 9,34 Z" fill="#e8a05c" stroke="#b06f33" stroke-width="2.2"/></svg></button>
+				<button data-tab="deco" title="装扮"><svg viewBox="0 0 44 44"><circle cx="15" cy="16" r="6" fill="#ffffff" stroke="#6b4a2b" stroke-width="2.4"/><circle cx="17" cy="17" r="2.4" fill="#2f2620"/><path d="M23,30 L31,25 Q34,29 31,35 L23,30 Z" fill="#c9364a" stroke="#8c2436" stroke-width="2"/><circle cx="33" cy="12" r="4" fill="#f2a7c4" stroke="#b26e8d" stroke-width="2"/></svg></button>
+			</span>
 			<button id="wsTurnBtn" title="转一转"><svg viewBox="0 0 44 44"><ellipse cx="22" cy="24" rx="14" ry="6.5" fill="none" stroke="#6b4a2b" stroke-width="3.6" stroke-dasharray="5 4"/><path d="M36,20 L38,27 L30,25 Z" fill="#6b4a2b"/><circle cx="22" cy="16" r="6.5" fill="#b98a5a" stroke="#6b4a2b" stroke-width="2.6"/></svg></button>
 			<button id="wsDoneBtn" title="完成！带它回黏土板一起玩"><svg viewBox="0 0 44 44"><ellipse cx="22" cy="33" rx="16" ry="6" fill="#d9b98a" stroke="#b9822e" stroke-width="2.4"/><circle cx="22" cy="14" r="6.5" fill="#7dbb5f" stroke="#4a7d38" stroke-width="2.4"/><path d="M16,31 Q16,21 22,21 Q28,21 28,31 Z" fill="#7dbb5f" stroke="#4a7d38" stroke-width="2.4" stroke-linejoin="round"/><path d="M30,8 L34,13 L41,4" fill="none" stroke="#5f9e4c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 		</div>
