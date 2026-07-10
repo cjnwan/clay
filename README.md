@@ -15,7 +15,9 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 
 - **Tap a color** — a ball of clay plops in. Tap the board to place one exactly there.
 - **Drag from the palette** — carry a fresh ball anywhere.
-- **Drag clay** — move it; a welded creation moves as one piece.
+- **Drag clay** — the held piece leaves physics and tracks your finger exactly
+  (kinematic carry): it won't snag on things in the way, and it only sticks where you
+  drop it. A welded creation swings along and moves as one piece.
 - **Bring pieces together slowly** — they stick.
 - **Creations hold their pose** — once a build settles for half a second it "sets" like
   real clay and won't tip over, however top-heavy. Touching it softens it again.
@@ -27,6 +29,9 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
   surface raises a bump. Toggle again to go back to dragging.
 - **Pinch while dragging** — hold a piece with one finger, put a second finger down:
   spread/close to resize it, twist to rotate. It re-sticks to its neighbours on release.
+- **🤸 flip** — while holding a piece, tap 🤸 with your other hand: it tumbles 90° about
+  the axis that visibly flips it (a lying sausage stands up; tap again to lie it down).
+  Combined with set-in-place, upright sausages and edge-standing pancakes actually stay.
 - **Autosave & share** — your board saves automatically, and **the page URL is the share
   link**: copy it and the creation opens on any device. (Opening someone else's link
   won't overwrite your own save until you start editing.)

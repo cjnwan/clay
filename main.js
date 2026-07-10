@@ -959,8 +959,8 @@ function stickyPass() {
 
 			const a = balls[ i ], b = balls[ j ];
 			if ( a.kind !== 'clay' && b.kind !== 'clay' ) continue; // 贴件之间不互黏
-			// 正被拖着的贴件不吸附：先摆到位，松手才贴（否则一碰就焊死没法微调）
-			if ( drag && drag.rec.kind !== 'clay' && ( a === drag.rec || b === drag.rec ) ) continue;
+			// 手里的件不吸附：先摆到位，松手才黏（否则拖着穿过别的作品会被半路焊住）
+			if ( drag && ( a === drag.rec || b === drag.rec ) ) continue;
 
 			const key = weldKey( a.id, b.id );
 			if ( weldedKeys.has( key ) ) continue;
@@ -1084,7 +1084,8 @@ function freezePass() {
 		if ( v.x * v.x + v.y * v.y + v.z * v.z < FREEZE_LIN2
 			&& w.x * w.x + w.y * w.y + w.z * w.z < FREEZE_ANG2 ) {
 
-			if ( ++ rec.slowTicks >= 2 ) {
+			const need = rec.justPlaced && stepCount - rec.justPlaced < 120 ? 1 : 2;
+			if ( ++ rec.slowTicks >= need ) {
 
 				b3.b3Body_SetType( rec.body, b3.b3BodyType.b3_staticBody );
 				rec.frozen = true;
@@ -1106,20 +1107,26 @@ function dragControl() {
 
 	if ( ! drag || ! drag.rec.alive ) return;
 
-	const p = b3.b3Body_GetPosition( drag.rec.body );
-	let vx = ( drag.target.x - p.x ) * 14;
-	let vy = ( drag.target.y - p.y ) * 14;
-	let vz = ( drag.target.z - p.z ) * 14;
-	const len = Math.hypot( vx, vy, vz );
-	if ( len > 20 ) { const s = 20 / len; vx *= s; vy *= s; vz *= s; }
-	const v = { x: vx, y: vy, z: vz };
+	const q = drag.targetQuat;
+	b3.b3Body_SetTargetTransform( drag.rec.body, {
+		p: { x: drag.target.x, y: drag.target.y, z: drag.target.z },
+		q: { v: { x: q.x, y: q.y, z: q.z }, s: q.w },
+	}, STEP, true );
 
-	for ( const rec of clusterOf( drag.rec ) ) {
+	// SetTargetTransform 的位置部分很准，但 0.0.2 里旋转不跟：用误差四元数自己驱动角速度
+	const cur = b3.b3Body_GetRotation( drag.rec.body );
+	_q.set( cur.v.x, cur.v.y, cur.v.z, cur.s ).invert().premultiply( q );
+	if ( _q.w < 0 ) { _q.x *= - 1; _q.y *= - 1; _q.z *= - 1; _q.w *= - 1; }
+	const ang = 2 * Math.acos( Math.min( 1, _q.w ) );
+	const halfSin = Math.sqrt( Math.max( 0, 1 - _q.w * _q.w ) );
+	if ( ang > 0.02 && halfSin > 1e-4 ) {
 
-		b3.b3Body_SetLinearVelocity( rec.body, v );
-		const av = b3.b3Body_GetAngularVelocity( rec.body );
-		b3.b3Body_SetAngularVelocity( rec.body, { x: av.x * 0.8, y: av.y * 0.8, z: av.z * 0.8 } );
-		b3.b3Body_SetAwake( rec.body, true );
+		const f = Math.min( ang * 8, 12 ) / halfSin;
+		b3.b3Body_SetAngularVelocity( drag.rec.body, { x: _q.x * f, y: _q.y * f, z: _q.z * f } );
+
+	} else {
+
+		b3.b3Body_SetAngularVelocity( drag.rec.body, { x: 0, y: 0, z: 0 } );
 
 	}
 
@@ -1127,6 +1134,7 @@ function dragControl() {
 
 function hop( rec ) {
 
+	rec.justPlaced = 0;
 	unfreezeCluster( rec );
 	const m = b3.b3Body_GetMass( rec.body );
 	b3.b3Body_ApplyLinearImpulseToCenter( rec.body, {
@@ -1293,10 +1301,34 @@ function pickBall() {
 
 function startDrag( rec ) {
 
+	// 拿在手里的东西不归物理管：转运动学体，1:1 跟手、不被路上的东西挂住。
 	// 起点就是当前位置：短按不预抬，免得单击时球被“拽”一下
 	const p = b3.b3Body_GetPosition( rec.body );
-	drag = { rec, target: new THREE.Vector3( p.x, p.y, p.z ) };
+	const q = b3.b3Body_GetRotation( rec.body );
+	drag = {
+		rec,
+		target: new THREE.Vector3( p.x, p.y, p.z ),
+		targetQuat: new THREE.Quaternion( q.v.x, q.v.y, q.v.z, q.s ),
+	};
+	rec.frozen = false;
+	rec.slowTicks = 0;
+	b3.b3Body_SetType( rec.body, b3.b3BodyType.b3_kinematicBody );
 	b3.b3Body_SetAwake( rec.body, true );
+
+}
+
+// 松手：还给物理世界（速度由 SetTargetTransform 遗留，甩出去仍有惯性）
+function endDrag() {
+
+	if ( drag && drag.rec.alive ) {
+
+		b3.b3Body_SetType( drag.rec.body, b3.b3BodyType.b3_dynamicBody );
+		b3.b3Body_SetAwake( drag.rec.body, true );
+		// 刚放下的件享受快速定型：落稳一瞬间就定住，竖着的香肠才立得住
+		drag.rec.justPlaced = stepCount;
+
+	}
+	drag = null;
 
 }
 
@@ -1330,16 +1362,10 @@ function updatePinch( e ) {
 	if ( dA > Math.PI ) dA -= Math.PI * 2;
 	if ( dA < - Math.PI ) dA += Math.PI * 2;
 	P.lastAngle = angle;
-	if ( Math.abs( dA ) > 0.002 ) {
+	if ( Math.abs( dA ) > 0.002 && drag ) {
 
 		if ( ! P.detached ) { detach( rec, true ); P.detached = true; }
-
-		const p = b3.b3Body_GetPosition( rec.body );
-		const q = b3.b3Body_GetRotation( rec.body );
-		_q.set( q.v.x, q.v.y, q.v.z, q.s );
-		_q.premultiply( new THREE.Quaternion().setFromAxisAngle( UP, - dA ) );
-		b3.b3Body_SetTransform( rec.body, p, { v: { x: _q.x, y: _q.y, z: _q.z }, s: _q.w } );
-		b3.b3Body_SetAngularVelocity( rec.body, { x: 0, y: 0, z: 0 } );
+		drag.targetQuat.premultiply( new THREE.Quaternion().setFromAxisAngle( UP, - dA ) );
 		markDirty();
 
 	}
@@ -1416,7 +1442,8 @@ function onPointerMove( e ) {
 
 				session.type = 'ball';
 				session.rec = rec;
-				drag = { rec, target: _v.clone() };
+				startDrag( rec );
+				drag.target.set( _v.x, LIFT_Y, _v.z );
 
 			}
 
@@ -1483,7 +1510,7 @@ function onPointerUp( e ) {
 			}
 
 		}
-		drag = null;
+		endDrag();
 
 	} else if ( session.type === 'table' ) {
 
@@ -1519,7 +1546,7 @@ function onPointerCancel( e ) {
 
 	}
 	if ( e.pointerId !== session.pointerId ) return;
-	drag = null;
+	endDrag();
 	endSession();
 
 }
@@ -1576,7 +1603,7 @@ function endSession() {
 
 function cancelSession() {
 
-	drag = null;
+	endDrag();
 	endSession();
 
 }
@@ -1694,10 +1721,10 @@ function setupPointer() {
 		if ( rec ) {
 
 			beginSession( { type: 'ball', rec, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false } );
-			startDrag( rec );
 			if ( rec.kind === 'clay' ) { unfreezeCluster( rec ); armMorphHold( session ); }
 			// 抓贴件 = 单独挪贴件（解冻并安静地从作品上拆下来）；抓黏土才是搬整团
 			else { unfreeze( rec ); detach( rec, true ); }
+			startDrag( rec );
 
 		} else {
 
@@ -1790,6 +1817,32 @@ function setupUI() {
 		} );
 
 	}
+
+	// 🤸 翻跟头：拖住一块黏土时点一下，绕水平轴翻 90°（松手后定型就能立住）
+	document.getElementById( 'flipBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		ensureAudio();
+		if ( drag && drag.rec.alive ) {
+
+			// 翻转轴取水平面内垂直于该件长轴（local X）的方向：躺着的翻起来站直，站着的翻回躺平
+			const lx = new THREE.Vector3( 1, 0, 0 ).applyQuaternion( drag.targetQuat );
+			lx.y = 0;
+			let axis;
+			if ( lx.lengthSq() < 0.1 ) axis = new THREE.Vector3( 1, 0, 0 );
+			else { lx.normalize(); axis = new THREE.Vector3( - lx.z, 0, lx.x ); }
+			drag.targetQuat.premultiply( new THREE.Quaternion().setFromAxisAngle( axis, - Math.PI / 2 ) );
+			markDirty();
+			boing();
+
+		} else {
+
+			setHint( '🤸 先按住一块黏土不放，另一只手点我翻跟头' );
+			setTimeout( () => { if ( ! demoRun ) resetHint(); }, 2600 );
+
+		}
+
+	} );
 
 	// 🤏 捏捏模式开关
 	const kneadBtn = document.getElementById( 'kneadBtn' );
@@ -2279,6 +2332,7 @@ window.__clay = {
 	load: ( data ) => loadScene( typeof data === 'string' ? JSON.parse( data ) : data ),
 	dump: () => serializeScene(),
 	raw: () => ( { b3, world, effect, balls, FORMS } ),
+	dragInfo: () => ( drag ? { id: drag.rec.id, target: drag.target.toArray(), quat: drag.targetQuat.toArray() } : null ),
 	project: ( x, y, z ) => {
 
 		const v = new THREE.Vector3( x, y, z ).project( camera );
