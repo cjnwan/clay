@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Box3D from 'box3d.js/inline';
-import { BODY_TEMPLATES, bakeBodyMesh, buildWorkshopStage, WORKSHOP_POS } from './workshop.js';
+import { BODY_TEMPLATES, bakeBodyMesh, buildWorkshopStage, WORKSHOP_POS, PARTS, buildPart } from './workshop.js';
 
 // ---------- 常量 ----------
 
@@ -91,6 +91,9 @@ let workshop = null;             // 🧸 工坊态：{ tplIndex, colorIndex, yaw
 let wsStage = null;              // 工坊转盘台（懒创建，{ group, figure }）
 let wsKeep = null;               // 离开工坊时留档，再进来还是那只
 let wsDrag = null;               // 工坊里的转盘拖拽 { id, lastX }
+let wsPlace = null;              // 工坊部件放置拖拽 { id, entry, isNew, pinch }
+let wsShelf = null;              // 货架按钮的待拖出会话 { id, partId, x0, y0 }
+const MAX_WS_PARTS = 24;
 let camBlend = 0;                // 相机混合：0=黏土板 1=工坊
 const boardCamPos = new THREE.Vector3();
 const WS_CAM_OFF = new THREE.Vector3( 0, 2.3, 6.2 );
@@ -2130,7 +2133,7 @@ function setupPointer() {
 	}, true );
 
 	// 切后台 / 失焦时正在进行的会话一并取消，防止残留；顺手把作品立即存档
-	window.addEventListener( 'blur', cancelSession );
+	window.addEventListener( 'blur', () => { cancelSession(); wsCancelPlace(); } );
 	document.addEventListener( 'visibilitychange', () => {
 
 		if ( document.hidden ) {
@@ -2354,6 +2357,30 @@ function setupUI() {
 		boing();
 
 	} );
+	// 部件货架：点一下上膛（下一按放置），直接拖出来立即开始放
+	document.querySelectorAll( '#wsPartRow button' ).forEach( ( btn ) => {
+
+		btn.addEventListener( 'pointerdown', ( e ) => {
+
+			e.preventDefault();
+			if ( ! workshop || wsPlace || wsShelf ) return;
+			ensureAudio();
+			const partId = btn.dataset.part;
+			workshop.placing = workshop.placing === partId ? null : partId; // 再点一次取消上膛
+			selectWsShelf( workshop.placing );
+			if ( workshop.placing ) {
+
+				wsShelf = { id: e.pointerId, partId, x0: e.clientX, y0: e.clientY };
+				window.addEventListener( 'pointermove', wsShelfMove );
+				window.addEventListener( 'pointerup', wsShelfUp );
+				setHint( '🧸 按到小家伙身上拖一拖，松手就长上啦（成对的会自动长两个）' );
+
+			}
+
+		} );
+
+	} );
+
 	const wsColorRow = document.getElementById( 'wsColorRow' );
 	CLAY_COLORS.forEach( ( c, i ) => {
 
@@ -2367,8 +2394,33 @@ function setupUI() {
 			e.preventDefault();
 			if ( ! workshop ) return;
 			ensureAudio();
+
+			// 上膛/正在放的是色片这类"自带颜色"的部件：点色块只是换颜料，不动身体
+			const placingOwn = ( workshop.placing && PARTS[ workshop.placing ].role === 'own' )
+				|| ( wsPlace && wsPlace.entry.role === 'own' );
+			if ( placingOwn ) {
+
+				workshop.partColorIndex = i;
+				if ( wsPlace && wsPlace.entry.role === 'own' ) {
+
+					wsPlace.entry.colorHex = CLAY_COLORS[ i ];
+					for ( const m of wsPlace.entry.mats ) m.color.setHex( CLAY_COLORS[ i ] );
+
+				}
+				selectWsColor( i );
+				dabTick();
+				return;
+
+			}
+
 			workshop.colorIndex = i;
 			if ( workshop.bodyMat ) workshop.bodyMat.color.setHex( CLAY_COLORS[ i ] );
+			// 跟身体同色的部件（耳朵、小手）一起换：玩偶服是一体的
+			for ( const en of workshop.parts ) {
+
+				if ( en.role === 'body' ) for ( const m of en.mats ) m.color.setHex( CLAY_COLORS[ i ] );
+
+			}
 			selectWsColor( i );
 			dabTick();
 
@@ -2834,23 +2886,28 @@ function enterWorkshop() {
 	stopDemo();
 	saveScene();
 	if ( ! wsStage ) wsStage = buildWorkshopStage( scene );
-	workshop = wsKeep || { tplIndex: 0, colorIndex: 9, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null };
+	workshop = wsKeep || { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
 	if ( ! workshop.figureMesh ) rebuildWsBody();
 	selectWsColor( workshop.colorIndex );
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
 	document.getElementById( 'workshopBar' ).classList.remove( 'hidden' );
-	setHint( '🧸 手办工坊：拖一拖转圈看 · 点色块换颜色 · 换个身体 · ⬅ 回黏土板' );
+	document.body.classList.add( 'ws' );
+	setHint( '🧸 手办工坊：货架上拖个部件按上去 · 拖一拖转圈看 · 点色块换颜色 · ⬅ 回黏土板' );
 
 }
 
 function exitWorkshop() {
 
 	if ( ! workshop ) return;
+	wsCancelPlace();
+	workshop.placing = null;
+	selectWsShelf( null );
 	wsKeep = workshop; // 半成品留着，回来接着捏
 	workshop = null;
 	wsDrag = null;
 	document.getElementById( 'palette' ).classList.remove( 'hidden' );
 	document.getElementById( 'workshopBar' ).classList.add( 'hidden' );
+	document.body.classList.remove( 'ws' );
 	resetHint();
 
 }
@@ -2865,7 +2922,261 @@ function selectWsColor( i ) {
 
 }
 
-// 工坊里的指针：横向拖动 = 转转盘（部件放置在 Stage 3 加入）
+// ---------- 工坊部件放置：射线打在烘焙身体上，部件沿表面滑动，成对自动镜像 ----------
+
+// 身体表面命中（figure 局部系）：点 + 平滑法线（面三顶点法线平均）
+function wsSurfaceHit() {
+
+	const body = workshop && workshop.figureMesh;
+	if ( ! body ) return null;
+	const hits = raycaster.intersectObject( body, false );
+	if ( ! hits.length ) return null;
+	const h = hits[ 0 ];
+	const na = body.geometry.getAttribute( 'normal' );
+	_v.set( 0, 0, 0 );
+	for ( const idx of [ h.face.a, h.face.b, h.face.c ] ) _v.add( _v2.fromBufferAttribute( na, idx ) );
+	_v.normalize();
+	// body 在 figure 里没有额外旋转：对象空间法线即 figure 局部法线
+	return { lp: wsStage.figure.worldToLocal( h.point.clone() ), ln: _v.clone() };
+
+}
+
+// 新建部件条目（成对部件带镜像孪生）
+function wsAddPartEntry( partId ) {
+
+	if ( workshop.parts.length >= MAX_WS_PARTS ) { shakePalette(); return null; }
+	const def = PARTS[ partId ];
+	const colorHex = CLAY_COLORS[ def.role === 'own' ? workshop.partColorIndex : workshop.colorIndex ];
+	const a = buildPart( partId, colorHex );
+	wsStage.figure.add( a.group );
+	const entry = {
+		partId, role: def.role, colorHex, k: 1,
+		lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 0, 1 ),
+		group: a.group, mesh: a.mesh, mats: [ a.mat ],
+		twinGroup: null, twinMesh: null,
+	};
+	if ( def.paired ) {
+
+		const b = buildPart( partId, colorHex );
+		wsStage.figure.add( b.group );
+		entry.twinGroup = b.group;
+		entry.twinMesh = b.mesh;
+		entry.mats.push( b.mat );
+
+	}
+	return entry;
+
+}
+
+function applyWsPose( en ) {
+
+	en.group.position.copy( en.lp );
+	en.group.quaternion.setFromUnitVectors( Z_OUT, en.ln );
+	en.group.scale.setScalar( en.k );
+	en.group.visible = true;
+	if ( en.twinGroup ) {
+
+		const show = Math.abs( en.lp.x ) > 0.1; // 贴着中线时不出孪生，免得叠在一起
+		en.twinGroup.visible = show;
+		if ( show ) {
+
+			en.twinGroup.position.set( - en.lp.x, en.lp.y, en.lp.z );
+			_v.set( - en.ln.x, en.ln.y, en.ln.z );
+			en.twinGroup.quaternion.setFromUnitVectors( Z_OUT, _v );
+			en.twinGroup.scale.setScalar( en.k );
+
+		}
+
+	}
+
+}
+
+function wsSetGhost( en, ghost ) {
+
+	for ( const m of en.mats ) {
+
+		m.transparent = ghost;
+		m.opacity = ghost ? 0.72 : 1;
+		m.needsUpdate = false;
+
+	}
+
+}
+
+// 点到已放置的部件？（身体更近时让位给转盘拖拽）
+function pickWsPart() {
+
+	const hits = raycaster.intersectObject( wsStage.figure, true );
+	for ( const h of hits ) {
+
+		if ( h.object === workshop.figureMesh ) return null;
+		if ( h.object.userData.isPart ) {
+
+			for ( const en of workshop.parts ) {
+
+				if ( en.mesh === h.object || en.twinMesh === h.object ) return en;
+
+			}
+
+		}
+
+	}
+	return null;
+
+}
+
+function wsPlaceMoveTo( e ) {
+
+	setRay( e );
+	const en = wsPlace.entry;
+	const hit = wsSurfaceHit();
+	if ( hit ) {
+
+		const def = PARTS[ en.partId ];
+		if ( def.centerSnap && Math.abs( hit.lp.x ) < 0.16 ) hit.lp.x *= 0.25; // 中线软吸附（鼻子、肚兜放得正）
+		en.ln.copy( hit.ln );
+		en.lp.copy( hit.lp ).addScaledVector( hit.ln, - def.sink * en.k );
+		applyWsPose( en );
+		wsPlace.valid = true;
+
+	} else {
+
+		en.group.visible = false;
+		if ( en.twinGroup ) en.twinGroup.visible = false;
+		wsPlace.valid = false;
+
+	}
+
+}
+
+function wsPlacePointerMove( e ) {
+
+	if ( ! wsPlace || ! workshop ) return;
+	if ( wsPlace.pinch && e.pointerId === wsPlace.pinch.id2 ) {
+
+		// 第二指：捏合调部件大小
+		const d = Math.max( 1, Math.hypot( e.clientX - wsPlace.x, e.clientY - wsPlace.y ) );
+		wsPlace.entry.k = THREE.MathUtils.clamp( wsPlace.pinch.startK * d / wsPlace.pinch.startDist, 0.45, 2 );
+		applyWsPose( wsPlace.entry );
+		return;
+
+	}
+	if ( e.pointerId !== wsPlace.id ) return;
+	wsPlace.x = e.clientX; wsPlace.y = e.clientY;
+	wsPlaceMoveTo( e );
+
+}
+
+function wsDiscardEntry( en ) {
+
+	wsStage.figure.remove( en.group );
+	if ( en.twinGroup ) wsStage.figure.remove( en.twinGroup );
+	const i = workshop.parts.indexOf( en );
+	if ( i >= 0 ) workshop.parts.splice( i, 1 );
+
+}
+
+function wsPlacePointerUp( e ) {
+
+	if ( ! wsPlace ) return;
+	if ( wsPlace.pinch && e.pointerId === wsPlace.pinch.id2 ) { wsPlace.pinch = null; return; }
+	if ( e.pointerId !== wsPlace.id ) return;
+	const en = wsPlace.entry;
+	if ( wsPlace.valid ) {
+
+		wsSetGhost( en, false );
+		if ( ! workshop.parts.includes( en ) ) workshop.parts.push( en );
+		squish();
+
+	} else {
+
+		wsDiscardEntry( en ); // 拖离身体松手 = 收回这个部件
+		pop();
+
+	}
+	wsPlace = null;
+	window.removeEventListener( 'pointermove', wsPlacePointerMove );
+	window.removeEventListener( 'pointerup', wsPlacePointerUp );
+	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
+	setHint( '🧸 手办工坊：货架上拖个部件按上去 · 拖住时加一指调大小 · 拖下来就收回' );
+
+}
+
+function beginWsPlace( e, entry, isNew ) {
+
+	wsPlace = { id: e.pointerId, entry, isNew, valid: false, pinch: null, x: e.clientX, y: e.clientY };
+	wsSetGhost( entry, true );
+	window.addEventListener( 'pointermove', wsPlacePointerMove );
+	window.addEventListener( 'pointerup', wsPlacePointerUp );
+	window.addEventListener( 'pointercancel', wsPlacePointerUp );
+
+}
+
+function wsCancelPlace() {
+
+	if ( wsShelf ) wsShelfCleanup();
+	if ( ! wsPlace ) return;
+	const en = wsPlace.entry;
+	if ( wsPlace.valid ) {
+
+		wsSetGhost( en, false );
+		if ( ! workshop.parts.includes( en ) ) workshop.parts.push( en );
+
+	} else {
+
+		wsDiscardEntry( en );
+
+	}
+	wsPlace = null;
+	window.removeEventListener( 'pointermove', wsPlacePointerMove );
+	window.removeEventListener( 'pointerup', wsPlacePointerUp );
+	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
+
+}
+
+// 货架按钮：点一下 = 上膛（下一次按到身上就放），拖出来 = 直接开始放置
+function wsShelfCleanup() {
+
+	wsShelf = null;
+	window.removeEventListener( 'pointermove', wsShelfMove );
+	window.removeEventListener( 'pointerup', wsShelfUp );
+
+}
+
+function wsShelfMove( e ) {
+
+	if ( ! wsShelf || e.pointerId !== wsShelf.id || ! workshop ) return;
+	if ( Math.hypot( e.clientX - wsShelf.x0, e.clientY - wsShelf.y0 ) < 12 ) return;
+	const partId = wsShelf.partId;
+	wsShelfCleanup();
+	selectWsShelf( null );
+	workshop.placing = null;
+	const entry = wsAddPartEntry( partId );
+	if ( ! entry ) return;
+	beginWsPlace( e, entry, true );
+	wsPlaceMoveTo( e );
+
+}
+
+function wsShelfUp( e ) {
+
+	if ( ! wsShelf || e.pointerId !== wsShelf.id ) return;
+	// 没拖出去：保持上膛状态，等着按到身上
+	wsShelfCleanup();
+
+}
+
+function selectWsShelf( partId ) {
+
+	document.querySelectorAll( '#wsPartRow button' ).forEach( ( el ) => {
+
+		el.classList.toggle( 'selected', el.dataset.part === partId );
+
+	} );
+
+}
+
+// 工坊里的指针：部件放置优先，其次拿起已放置的部件，否则转转盘
 function wsPointerMove( e ) {
 
 	if ( ! wsDrag || e.pointerId !== wsDrag.id || ! workshop ) return;
@@ -2889,7 +3200,46 @@ function wsPointerUp( e ) {
 function wsPointerDown( e ) {
 
 	ensureAudio();
+
+	// 放置中落第二指：进入捏合调大小
+	if ( wsPlace ) {
+
+		if ( e.pointerId !== wsPlace.id && ! wsPlace.pinch ) {
+
+			const d = Math.hypot( e.clientX - wsPlace.x, e.clientY - wsPlace.y );
+			if ( d > 40 ) wsPlace.pinch = { id2: e.pointerId, startDist: d, startK: wsPlace.entry.k };
+
+		}
+		return;
+
+	}
 	if ( wsDrag ) return;
+	setRay( e );
+
+	// 货架上膛过：这一按就是放置
+	if ( workshop.placing ) {
+
+		const partId = workshop.placing;
+		workshop.placing = null;
+		selectWsShelf( null );
+		const entry = wsAddPartEntry( partId );
+		if ( ! entry ) return;
+		beginWsPlace( e, entry, true );
+		wsPlaceMoveTo( e );
+		return;
+
+	}
+
+	// 点到已放置部件：拿起来重新放
+	const picked = pickWsPart();
+	if ( picked ) {
+
+		beginWsPlace( e, picked, false );
+		wsPlaceMoveTo( e );
+		return;
+
+	}
+
 	wsDrag = { id: e.pointerId, lastX: e.clientX };
 	window.addEventListener( 'pointermove', wsPointerMove );
 	window.addEventListener( 'pointerup', wsPointerUp );
@@ -3379,7 +3729,11 @@ window.__clay = {
 	dragInfo: () => ( drag ? { id: drag.rec.id, target: drag.target.toArray(), quat: drag.targetQuat.toArray() } : null ),
 	// 🧸 工坊开关与状态（测试用）
 	ws: () => { workshop ? exitWorkshop() : enterWorkshop(); return ! ! workshop; },
-	wsState: () => ( workshop ? { tpl: workshop.tplIndex, ci: workshop.colorIndex, yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ) } : { blend: + camBlend.toFixed( 2 ) } ),
+	wsState: () => ( workshop ? {
+		tpl: workshop.tplIndex, ci: workshop.colorIndex, yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ),
+		placing: workshop.placing,
+		parts: workshop.parts.map( ( en ) => ( { p: en.partId, k: + en.k.toFixed( 2 ), x: + en.lp.x.toFixed( 2 ), y: + en.lp.y.toFixed( 2 ), z: + en.lp.z.toFixed( 2 ), twin: !! ( en.twinGroup && en.twinGroup.visible ) } ) ),
+	} : { blend: + camBlend.toFixed( 2 ) } ),
 	// 工坊 Stage 1 验证：烘焙身体模板并摆到盘中央看效果/耗时
 	bake: ( i = 0, res = 88 ) => {
 

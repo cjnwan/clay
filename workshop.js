@@ -57,6 +57,50 @@ export function buildWorkshopStage( scene ) {
 
 }
 
+// ---------- 部件库：一切"清晰细节"都是真网格（硬边界、无分辨率下限） ----------
+// paired = 自动左右镜像；sink = 底部嵌进身体的深度；role: 'body' 跟身体一起换色 / 'own' 用放置时选的颜色
+// build(mat) 返回 +Z 朝外的网格
+export const PARTS = {
+	ear: { name: '耳朵', paired: true, sink: 0.07, role: 'body', build: ( mat ) => {
+
+		const m = new THREE.Mesh( new THREE.SphereGeometry( 0.2, 20, 16 ), mat );
+		m.scale.set( 1, 1, 0.55 ); // 略扁的圆耳朵
+		return m;
+
+	} },
+	arm: { name: '小手', paired: true, sink: 0.1, role: 'body', build: ( mat ) => {
+
+		const g = new THREE.CapsuleGeometry( 0.13, 0.22, 8, 16 );
+		g.rotateX( Math.PI / 2 ); // 胶囊默认沿 Y，转成沿 +Z 伸出去
+		g.translate( 0, 0, 0.1 );
+		return new THREE.Mesh( g, mat );
+
+	} },
+	patch: { name: '色片', paired: false, sink: 0.03, role: 'own', centerSnap: true, build: ( mat ) => {
+
+		const m = new THREE.Mesh( new THREE.SphereGeometry( 0.26, 24, 16 ), mat );
+		m.scale.set( 1, 1, 0.2 ); // 压上去的一小片彩泥：扁球贴面，边界干净锐利
+		return m;
+
+	} },
+};
+
+// 造一个部件实例：独立材质（幽灵态要单独调透明度），黏土质感与本体一致
+export function buildPart( partId, colorHex ) {
+
+	const def = PARTS[ partId ];
+	const mat = new THREE.MeshPhysicalMaterial( {
+		color: colorHex,
+		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
+	} );
+	const group = new THREE.Group();
+	const mesh = def.build( mat );
+	mesh.userData.isPart = true;
+	group.add( mesh );
+	return { group, mesh, mat };
+
+}
+
 // 把模板烘焙成静态 BufferGeometry 网格。
 // 域取紧立方包围盒；域底比最低点略高一点，边界裁切自然给出"坐得平"的压扁底。
 export function bakeBodyMesh( template, material, res = 88 ) {

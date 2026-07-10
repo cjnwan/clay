@@ -132,6 +132,9 @@
 			#hint { bottom: 190px; }
 		}
 
+		/* 工坊条有三行，提示文字上移别被挡住 */
+		body.ws #hint { bottom: 224px; }
+
 		#palette.shake { animation: shake 0.3s; }
 
 		@keyframes shake {
@@ -222,6 +225,11 @@
 	<!-- 手办工坊的工具条：进工坊时替换调色盘 -->
 	<div id="workshopBar" class="hidden">
 		<div class="prow" id="wsColorRow"></div>
+		<div class="prow" id="wsPartRow">
+			<button data-part="ear" title="耳朵（自动长一对）"><svg viewBox="0 0 44 44"><ellipse cx="15" cy="18" rx="8" ry="10" fill="#e8b28a" stroke="#a06b43" stroke-width="2.6" transform="rotate(-14 15 18)"/><ellipse cx="15" cy="19" rx="4" ry="5.5" fill="#f2a7c4" transform="rotate(-14 15 19)"/><path d="M24,34 Q30,26 38,28" fill="none" stroke="#a06b43" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5"/></svg></button>
+			<button data-part="arm" title="小手（自动长一对）"><svg viewBox="0 0 44 44"><path d="M8,22 Q20,14 33,20" fill="none" stroke="#e8b28a" stroke-width="9" stroke-linecap="round"/><circle cx="34" cy="20.5" r="6" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/></svg></button>
+			<button data-part="patch" title="色片：压一小块彩泥上去"><svg viewBox="0 0 44 44"><ellipse cx="22" cy="23" rx="13" ry="10" fill="#f2e0c2" stroke="#c4ad8a" stroke-width="2.6"/><ellipse cx="18" cy="20" rx="4" ry="2.6" fill="#ffffff" opacity="0.7"/></svg></button>
+		</div>
 		<div class="prow">
 			<button id="wsBackBtn" title="回到黏土板"><svg viewBox="0 0 44 44"><path d="M26,10 L12,22 L26,34" fill="none" stroke="#6b4a2b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="31" cy="22" rx="6" ry="9" fill="#d9a75a" stroke="#b9822e" stroke-width="2.4"/></svg></button>
 			<button id="wsBodyBtn" title="换个身体"><svg viewBox="0 0 44 44"><circle cx="13" cy="14" r="7" fill="#f2a7c4" stroke="#b26e8d" stroke-width="2.4"/><path d="M6,36 Q6,25 13,25 Q20,25 20,36 Z" fill="#f2a7c4" stroke="#b26e8d" stroke-width="2.4" stroke-linejoin="round"/><circle cx="32" cy="12" r="5.5" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.4"/><path d="M26,36 Q26,20 32,20 Q38,20 38,36 Z" fill="#7dbbe0" stroke="#4a7da5" stroke-width="2.4" stroke-linejoin="round"/></svg></button>
