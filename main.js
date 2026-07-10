@@ -842,12 +842,13 @@ function r3( x ) {
 function serializeScene() {
 
 	const idx = new Map( balls.map( ( r, i ) => [ r.id, i ] ) );
-	return {
+	const out = {
 		v: 1,
 		p: balls.map( ( r ) => {
 
 			const p = b3.b3Body_GetPosition( r.body );
 			const o = { t: r.kind, p: [ r3( p.x ), r3( p.y ), r3( p.z ) ] };
+			if ( r.kind === 'figure' ) o.w = r.figData;
 			// 无坑无形的素球旋转不可见，省掉四元数给 hash 瘦身
 			const plain = r.kind === 'clay' && r.form === 0 && r.dents.length === 0;
 			if ( ! plain ) {
@@ -871,6 +872,10 @@ function serializeScene() {
 			.map( ( j ) => [ idx.get( j.aId ), idx.get( j.bId ), j.chain ? 1 : 0 ] )
 			.filter( ( a ) => a[ 0 ] !== undefined && a[ 1 ] !== undefined ),
 	};
+	// 工坊里的半成品也随存档走（刷新回来接着捏）
+	const wd = wsFigData( workshop || wsKeep );
+	if ( wd ) out.w = wd;
+	return out;
 
 }
 
@@ -919,6 +924,11 @@ function loadScene( data ) {
 							THREE.MathUtils.clamp( num( d[ 5 ], 1 ) | 0, 0, 2 ) ] );
 
 				}
+
+			} else if ( o.t === 'figure' ) {
+
+				// 初始 baseY 随便给，紧接着的通用 SetTransform 会摆到存档位置
+				rec = o.w ? createFigure( o.w, px, py, pz ) : null;
 
 			} else if ( DECOR[ o.t ] ) {
 
@@ -980,7 +990,8 @@ function saveScene() {
 	try {
 
 		const b64 = btoa( str ).replace( /\+/g, '-' ).replace( /\//g, '_' ).replace( /=+$/, '' );
-		history.replaceState( null, '', balls.length ? '#s=' + b64 : location.pathname + location.search );
+		const hasContent = balls.length > 0 || wsFigData( workshop || wsKeep );
+		history.replaceState( null, '', hasContent ? '#s=' + b64 : location.pathname + location.search );
 
 	} catch ( err ) {}
 
@@ -992,6 +1003,8 @@ function saveScene() {
 
 }
 
+let wsSavedData = null;          // 存档里的工坊半成品配方，进工坊时还原
+
 function restoreScene() {
 
 	const m = location.hash.match( /#s=([A-Za-z0-9_-]+)/ );
@@ -999,7 +1012,9 @@ function restoreScene() {
 
 		try {
 
-			if ( loadScene( JSON.parse( atob( m[ 1 ].replace( /-/g, '+' ).replace( /_/g, '/' ) ) ) ) ) return true;
+			const data = JSON.parse( atob( m[ 1 ].replace( /-/g, '+' ).replace( /_/g, '/' ) ) );
+			if ( data && data.w ) wsSavedData = data.w;
+			if ( loadScene( data ) ) return true;
 
 		} catch ( err ) { /* hash 不合法就走下一级 */ }
 
@@ -1007,7 +1022,13 @@ function restoreScene() {
 	try {
 
 		const str = localStorage.getItem( 'clay-scene' );
-		if ( str ) return loadScene( JSON.parse( str ) );
+		if ( str ) {
+
+			const data = JSON.parse( str );
+			if ( data && data.w ) wsSavedData = data.w;
+			return loadScene( data );
+
+		}
 
 	} catch ( err ) {}
 	return false;
@@ -1066,8 +1087,9 @@ function weldRaw( a, b, chain ) {
 
 function weld( a, b, key ) {
 
-	// 贴件（眼/嘴/帽）焊上去之前：+Z 转向外侧；圆球黏土还把它推到视觉表面之外，避免被 metaball 吞没
-	const dec = a.kind !== 'clay' ? a : ( b.kind !== 'clay' ? b : null );
+	// 贴件（眼/嘴/帽）焊上去之前：+Z 转向外侧；圆球黏土还把它推到视觉表面之外，避免被 metaball 吞没。
+	// 只有真贴件才转向——手办这类大件按原姿态焊
+	const dec = DECOR[ a.kind ] ? a : ( DECOR[ b.kind ] ? b : null );
 	if ( dec ) {
 
 		const other = dec === a ? b : a;
@@ -1915,8 +1937,8 @@ function onPointerMove( e ) {
 
 	if ( drag && session.rec ) {
 
-		// 贴件优先沿黏土表面滑动：贴在哪儿看得见、朝外站好（精确放置）
-		if ( drag.rec.kind !== 'clay' ) {
+		// 贴件优先沿黏土表面滑动：贴在哪儿看得见、朝外站好（精确放置）；手办等大件不吸表面
+		if ( drag.rec.kind !== 'clay' && DECOR[ drag.rec.kind ] ) {
 
 			const hit = surfaceHit();
 			if ( hit ) {
@@ -2355,6 +2377,29 @@ function setupUI() {
 		ensureAudio();
 		workshop.yawVel += 5;
 		boing();
+
+	} );
+	// ✓ 完成：手办变成黏土板上的一件玩具（单刚体），工坊清空迎接下一只
+	document.getElementById( 'wsDoneBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop || ! workshop.figureMesh || wsPlace ) return;
+		ensureAudio();
+		const fd = wsFigData( workshop );
+
+		// 拆台清场：部件与身体从转盘摘掉
+		for ( const en of [ ...workshop.parts ] ) wsDiscardEntry( en );
+		wsStage.figure.remove( workshop.figureMesh );
+		workshop.figureMesh.geometry.dispose();
+		workshop.figureMesh = null;
+		exitWorkshop();
+		wsKeep = null; // 下次进来是新的一只
+
+		createFigure( fd, ( Math.random() - 0.5 ) * 0.8, 0.4, ( Math.random() - 0.5 ) * 0.8 );
+		userTouched = true;
+		saveScene();
+		setHint( '🧸 它来啦！拖着玩、点一点跳、🎥 拍段短片吧' );
+		setTimeout( () => { if ( ! workshop ) resetHint(); }, 4000 );
 
 	} );
 	// 部件货架：点一下上膛（下一按放置），直接拖出来立即开始放
@@ -2889,6 +2934,157 @@ function rebuildWsBody() {
 
 }
 
+// ---------- 手办 ⇄ 存档/黏土板：同一份 figData 既是工坊存档也是板上手办的重建配方 ----------
+
+const _num = ( v, d ) => ( Number.isFinite( + v ) ? + v : d );
+const _ci = ( v ) => THREE.MathUtils.clamp( _num( v, 0 ) | 0, 0, CLAY_COLORS.length - 1 );
+
+// 工坊当前手办 → 可序列化配方（无内容返回 null）
+function wsFigData( w ) {
+
+	if ( ! w || ! w.figureMesh ) return null;
+	return {
+		t: w.tplIndex, c: w.colorIndex,
+		ps: w.parts.map( ( en ) => ( {
+			p: en.partId, k: r3( en.k ), c: Math.max( 0, CLAY_COLORS.indexOf( en.colorHex ) ),
+			lp: [ r3( en.lp.x ), r3( en.lp.y ), r3( en.lp.z ) ],
+			ln: [ r3( en.ln.x ), r3( en.ln.y ), r3( en.ln.z ) ],
+		} ) ),
+	};
+
+}
+
+// 配方 → 黏土板上的手办：一块 kind:'figure' 刚体（每个模板球一个 sphere 碰撞体），
+// 网格组挂在 rec.mesh 上由 syncEyes 通用同步。拖拽/弹跳/定型/焊接/拍短片全部照常适用
+function createFigure( fd, x, baseY, z ) {
+
+	if ( ! fd || balls.filter( ( r ) => r.kind === 'figure' ).length >= 4 ) { shakePalette(); return null; }
+
+	const tpl = THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 );
+	const template = BODY_TEMPLATES[ tpl ];
+	const mat = new THREE.MeshPhysicalMaterial( {
+		color: CLAY_COLORS[ _ci( fd.c ) ],
+		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
+	} );
+	const { mesh: bodyMesh, y0 } = bakeBodyMesh( template, mat );
+
+	// 身高与中心：刚体原点放在半身高处，拾取球才罩得住整只
+	let topY = 0;
+	for ( const b of template.balls ) topY = Math.max( topY, b.o[ 1 ] + b.r - y0 );
+	const cy = topY / 2;
+
+	const inner = new THREE.Group();
+	inner.position.y = - cy;
+	inner.add( bodyMesh );
+	const group = new THREE.Group();
+	group.add( inner );
+
+	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
+
+		if ( ! pd || ! PARTS[ pd.p ] ) continue;
+		const def = PARTS[ pd.p ];
+		const colorHex = CLAY_COLORS[ _ci( pd.c ) ];
+		const k = def.fitted ? 1 : THREE.MathUtils.clamp( _num( pd.k, 1 ), 0.45, 2 );
+		const lp = def.fitted ? new THREE.Vector3() : new THREE.Vector3(
+			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 0 ], 0 ), - 3, 3 ),
+			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 1 ], 0 ), - 3, 3 ),
+			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 2 ], 0 ), - 3, 3 ) );
+		const ln = def.fitted ? new THREE.Vector3( 0, 0, 1 ) : new THREE.Vector3(
+			_num( pd.ln && pd.ln[ 0 ], 0 ), _num( pd.ln && pd.ln[ 1 ], 0 ), _num( pd.ln && pd.ln[ 2 ], 1 ) );
+		if ( ln.lengthSq() < 1e-6 ) ln.set( 0, 0, 1 );
+		ln.normalize();
+
+		const place = ( px, nx ) => {
+
+			const built = def.fitted
+				? buildHoodPart( bodyMesh.geometry, template, y0, colorHex )
+				: buildPart( pd.p, colorHex );
+			built.group.position.set( px, lp.y, lp.z );
+			_v.set( nx, ln.y, ln.z );
+			built.group.quaternion.setFromUnitVectors( Z_OUT, _v );
+			built.group.scale.setScalar( k );
+			inner.add( built.group );
+
+		};
+		place( lp.x, ln.x );
+		if ( def.paired && Math.abs( lp.x ) > 0.1 ) place( - lp.x, - ln.x );
+
+	}
+
+	scene.add( group );
+
+	// 物理：每个模板球一个 sphere（复合形状撑起大致轮廓）；异常时退回单球
+	const bd = b3.b3DefaultBodyDef();
+	bd.type = b3.b3BodyType.b3_dynamicBody;
+	bd.position = { x, y: baseY + cy, z };
+	const body = b3.b3CreateBody( world, bd );
+	const sd = b3.b3DefaultShapeDef();
+	sd.baseMaterial.friction = 0.9;
+	sd.baseMaterial.restitution = 0.05;
+	let shape = null;
+	try {
+
+		for ( const b of template.balls ) {
+
+			shape = b3.b3CreateSphereShape( body, sd, {
+				center: { x: b.o[ 0 ], y: b.o[ 1 ] - y0 - cy, z: b.o[ 2 ] },
+				radius: b.r * 0.92,
+			} );
+
+		}
+
+	} catch ( err ) {
+
+		console.warn( 'figure compound shape failed, fallback to single sphere:', err );
+		shape = b3.b3CreateSphereShape( body, sd, { center: { x: 0, y: 0, z: 0 }, radius: cy } );
+
+	}
+	b3.b3Body_SetLinearDamping( body, 0.3 );
+	b3.b3Body_SetAngularDamping( body, 0.6 );
+
+	const rec = {
+		id: nextId ++, kind: 'figure', body, shape, r: cy * 1.05, k: 1, color: null,
+		mesh: group, alive: true, frozen: false, slowTicks: 0,
+		bornAt: performance.now(), popAt: 0,
+		figData: JSON.parse( JSON.stringify( fd ) ),
+	};
+	balls.push( rec );
+	markDirty();
+	plop();
+	return rec;
+
+}
+
+// 从存档配方还原工坊里的半成品
+function restoreWorkshop( fd ) {
+
+	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
+	rebuildWsBody();
+	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
+
+		if ( ! pd || ! PARTS[ pd.p ] ) continue;
+		workshop.partColorIndex = _ci( pd.c );
+		const en = wsAddPartEntry( pd.p );
+		if ( ! en ) break;
+		en.colorHex = CLAY_COLORS[ _ci( pd.c ) ];
+		for ( const m of en.mats ) if ( en.role !== 'fixed' ) m.color.setHex( en.colorHex );
+		if ( ! en.fitted ) {
+
+			en.k = THREE.MathUtils.clamp( _num( pd.k, 1 ), 0.45, 2 );
+			en.lp.set( _num( pd.lp && pd.lp[ 0 ], 0 ), _num( pd.lp && pd.lp[ 1 ], 0 ), _num( pd.lp && pd.lp[ 2 ], 0 ) ).clampScalar( - 3, 3 );
+			en.ln.set( _num( pd.ln && pd.ln[ 0 ], 0 ), _num( pd.ln && pd.ln[ 1 ], 0 ), _num( pd.ln && pd.ln[ 2 ], 1 ) );
+			if ( en.ln.lengthSq() < 1e-6 ) en.ln.set( 0, 0, 1 );
+			en.ln.normalize();
+
+		}
+		applyWsPose( en );
+		workshop.parts.push( en );
+
+	}
+	workshop.partColorIndex = 6;
+
+}
+
 function enterWorkshop() {
 
 	if ( workshop ) return;
@@ -2897,7 +3093,18 @@ function enterWorkshop() {
 	stopDemo();
 	saveScene();
 	if ( ! wsStage ) wsStage = buildWorkshopStage( scene );
-	workshop = wsKeep || { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
+	if ( wsKeep ) {
+
+		workshop = wsKeep;
+
+	} else if ( wsSavedData ) {
+
+		// 上次没捏完的：从存档接着来
+		try { restoreWorkshop( wsSavedData ); } catch ( err ) { console.warn( 'ws restore failed:', err ); workshop = null; }
+		wsSavedData = null;
+
+	}
+	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null };
 	if ( ! workshop.figureMesh ) rebuildWsBody();
 	selectWsColor( workshop.colorIndex );
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
@@ -3122,11 +3329,13 @@ function wsPlacePointerUp( e ) {
 
 		wsSetGhost( en, false );
 		if ( ! workshop.parts.includes( en ) ) workshop.parts.push( en );
+		markDirty(); // 半成品也进自动存档
 		squish();
 
 	} else {
 
 		wsDiscardEntry( en ); // 拖离身体松手 = 收回这个部件
+		markDirty();
 		pop();
 
 	}
