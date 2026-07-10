@@ -17,6 +17,8 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
 - **Drag from the palette** — carry a fresh ball anywhere.
 - **Drag clay** — move it; a welded creation moves as one piece.
 - **Bring pieces together slowly** — they stick.
+- **Creations hold their pose** — once a build settles for half a second it "sets" like
+  real clay and won't tip over, however top-heavy. Touching it softens it again.
 - **Press and hold clay** — it morphs: ball → squashed pancake → rolled sausage → brick → ball.
 - **● size** — cycle small / medium / large for new clay: proportions make creatures.
 - **🐍 snake** — a soft chain of linked segments; lift one end and the rest dangles.
@@ -53,8 +55,8 @@ to take over mid-show.
   sausage; random orientations read as sprawling tentacles.
 - **Doughnut / thumbprint cookie** — flatten a ball, then knead (🤏) the center
   repeatedly for a doughnut, or a ring of pokes for a crinkle-edge cookie.
-- Tip: to attach a piece high (Mickey ears), release the instant it sticks — and know
-  that a top-heavy build will tip over, just like real clay.
+- Tip: to attach a piece high (Mickey ears), just hold it in place for a moment —
+  the build sets and it stays.
 
 ## Run
 

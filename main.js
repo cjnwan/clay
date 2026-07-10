@@ -400,6 +400,8 @@ function createClay( x, y, z, colorIndex, vel, kOverride ) {
 		shape,
 		form: 0,
 		k,
+		frozen: false,
+		slowTicks: 0,
 		dents: [],
 		r: CLAY_R * k,
 		color: new THREE.Color( CLAY_COLORS[ colorIndex ] ),
@@ -447,7 +449,7 @@ function createDecor( kind, x, y, z ) {
 	const mesh = decorBuilders[ kind ]();
 	scene.add( mesh );
 
-	const rec = { id: nextId ++, kind, body, shape, r: spec.r, color: null, mesh, alive: true };
+	const rec = { id: nextId ++, kind, body, shape, r: spec.r, color: null, mesh, alive: true, frozen: false, slowTicks: 0 };
 	balls.push( rec );
 	markDirty();
 	plop();
@@ -500,6 +502,7 @@ function setForm( rec, form, quiet ) {
 
 	if ( rec.kind !== 'clay' || form === rec.form || ! rec.alive ) return;
 
+	unfreeze( rec );
 	detach( rec, true ); // 变形前先拆开，冷却结束后原地重新黏上
 
 	try {
@@ -529,6 +532,7 @@ function applyScale( rec, newK ) {
 
 	if ( rec.kind !== 'clay' || ! rec.alive ) return;
 
+	unfreeze( rec );
 	const ratio = newK / rec.k;
 	rec.k = newK;
 	rec.r = CLAY_R * newK;
@@ -920,6 +924,7 @@ function weld( a, b, key ) {
 
 function detach( rec, quiet ) {
 
+	unfreeze( rec );
 	let removed = false;
 	joints = joints.filter( ( j ) => {
 
@@ -993,6 +998,7 @@ function rescuePass() {
 
 	for ( const rec of balls ) {
 
+		if ( rec.frozen ) continue;
 		const p = b3.b3Body_GetPosition( rec.body );
 		if ( p.y < - 2 || Math.hypot( p.x, p.z ) > BOARD_HALF + 0.8 ) {
 
@@ -1010,8 +1016,8 @@ function rescuePass() {
 
 // ---------- 拖拽（速度伺服，比运动学切换更好地兼容焊接群） ----------
 
-// 沿焊接关节求连通团：拖一个球时整个作品一起走
-function clusterOf( rec ) {
+// 沿关节求连通团。includeChains=false 时跳过软链（拖拽时链保持柔软）
+function connectedOf( rec, includeChains ) {
 
 	const seen = new Set( [ rec.id ] );
 	const list = [ rec ];
@@ -1021,7 +1027,7 @@ function clusterOf( rec ) {
 		changed = false;
 		for ( const j of joints ) {
 
-			if ( j.chain ) continue; // 软链靠关节自己跟，拖拽时保持柔软
+			if ( ! includeChains && j.chain ) continue;
 			const hasA = seen.has( j.aId ), hasB = seen.has( j.bId );
 			if ( hasA === hasB ) continue;
 			const otherId = hasA ? j.bId : j.aId;
@@ -1032,6 +1038,67 @@ function clusterOf( rec ) {
 
 	}
 	return list;
+
+}
+
+function clusterOf( rec ) {
+
+	return connectedOf( rec, false );
+
+}
+
+// ---------- 定型：摆稳的黏土冻结成“雕像”，怎么歪都立得住；一碰又变软 ----------
+
+const FREEZE_LIN2 = 0.5 * 0.5;   // 线速度平方阈值
+const FREEZE_ANG2 = 1.0 * 1.0;   // 角速度平方阈值
+
+function unfreeze( rec ) {
+
+	if ( ! rec.frozen || ! rec.alive ) return;
+	rec.frozen = false;
+	rec.slowTicks = 0;
+	b3.b3Body_SetType( rec.body, b3.b3BodyType.b3_dynamicBody );
+	b3.b3Body_SetAwake( rec.body, true );
+
+}
+
+function unfreezeCluster( rec ) {
+
+	for ( const r of connectedOf( rec, true ) ) unfreeze( r );
+
+}
+
+// 每 15 步跑一次：连续两次检查（约 0.5 秒）都低速的件转为静态。
+// 头重脚轻的作品在倾倒加速前就被“定住”，这正是黏土“摆哪儿定哪儿”的手感
+function freezePass() {
+
+	const dragSet = drag ? new Set( connectedOf( drag.rec, true ).map( ( r ) => r.id ) ) : null;
+
+	for ( const rec of balls ) {
+
+		if ( rec.frozen || ! rec.alive ) continue;
+		if ( dragSet && dragSet.has( rec.id ) ) { rec.slowTicks = 0; continue; }
+
+		const v = b3.b3Body_GetLinearVelocity( rec.body );
+		const w = b3.b3Body_GetAngularVelocity( rec.body );
+		if ( v.x * v.x + v.y * v.y + v.z * v.z < FREEZE_LIN2
+			&& w.x * w.x + w.y * w.y + w.z * w.z < FREEZE_ANG2 ) {
+
+			if ( ++ rec.slowTicks >= 2 ) {
+
+				b3.b3Body_SetType( rec.body, b3.b3BodyType.b3_staticBody );
+				rec.frozen = true;
+				rec.slowTicks = 0;
+
+			}
+
+		} else {
+
+			rec.slowTicks = 0;
+
+		}
+
+	}
 
 }
 
@@ -1060,6 +1127,7 @@ function dragControl() {
 
 function hop( rec ) {
 
+	unfreezeCluster( rec );
 	const m = b3.b3Body_GetMass( rec.body );
 	b3.b3Body_ApplyLinearImpulseToCenter( rec.body, {
 		x: ( Math.random() - 0.5 ) * 2 * m,
@@ -1627,9 +1695,9 @@ function setupPointer() {
 
 			beginSession( { type: 'ball', rec, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false } );
 			startDrag( rec );
-			if ( rec.kind === 'clay' ) armMorphHold( session );
-			// 抓贴件 = 单独挪贴件（安静地从作品上拆下来）；抓黏土才是搬整团
-			else detach( rec, true );
+			if ( rec.kind === 'clay' ) { unfreezeCluster( rec ); armMorphHold( session ); }
+			// 抓贴件 = 单独挪贴件（解冻并安静地从作品上拆下来）；抓黏土才是搬整团
+			else { unfreeze( rec ); detach( rec, true ); }
 
 		} else {
 
@@ -2155,6 +2223,7 @@ function animate() {
 		b3.b3World_Step( world, STEP, 4 );
 		stepCount ++;
 		if ( stepCount % 6 === 0 ) stickyPass();
+		if ( stepCount % 15 === 0 ) freezePass();
 		if ( stepCount % 30 === 0 ) rescuePass();
 		acc -= STEP;
 
@@ -2174,7 +2243,7 @@ window.__clay = {
 		balls: balls.map( ( r ) => {
 
 			const p = b3.b3Body_GetPosition( r.body );
-			return { id: r.id, kind: r.kind, form: r.form, k: r.k, dents: r.dents ? r.dents.length : 0, x: + p.x.toFixed( 2 ), y: + p.y.toFixed( 2 ), z: + p.z.toFixed( 2 ), awake: b3.b3Body_IsAwake( r.body ) };
+			return { id: r.id, kind: r.kind, form: r.form, k: r.k, frozen: !! r.frozen, dents: r.dents ? r.dents.length : 0, x: + p.x.toFixed( 2 ), y: + p.y.toFixed( 2 ), z: + p.z.toFixed( 2 ), awake: b3.b3Body_IsAwake( r.body ) };
 
 		} ),
 		joints: joints.length,
@@ -2225,6 +2294,7 @@ window.__clay = {
 			b3.b3World_Step( world, STEP, 4 );
 			stepCount ++;
 			if ( stepCount % 6 === 0 ) stickyPass();
+			if ( stepCount % 15 === 0 ) freezePass();
 			if ( stepCount % 30 === 0 ) rescuePass();
 
 		}
