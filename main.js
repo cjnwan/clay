@@ -2599,13 +2599,13 @@ function setupUI() {
 			if ( ! workshop || ! workshop.cur ) return;
 			ensureAudio();
 
-			// 上膛/正在放的是色片这类"自带颜色"的部件：点色块只是换颜料，不动身体
-			const placingOwn = ( workshop.placing && PARTS[ workshop.placing ].role === 'own' )
-				|| ( wsPlace && ! wsPlace.entry.kind && wsPlace.entry.role === 'own' );
-			if ( placingOwn ) {
+			// 色块跟着 tab 走：装扮 tab 点色块 = 部件颜色（星星/爱心/色片/轮毂…），
+			// 形状/雕刻 tab 点色块 = 身体颜色。拖着 own 部件时任何 tab 都直接给它变色
+			const holdingOwn = wsPlace && ! wsPlace.entry.kind && wsPlace.entry.role === 'own';
+			if ( workshop.tab === 'deco' || holdingOwn ) {
 
 				workshop.partColorIndex = i;
-				if ( wsPlace && ! wsPlace.entry.kind && wsPlace.entry.role === 'own' ) {
+				if ( holdingOwn ) {
 
 					wsPlace.entry.colorHex = CLAY_COLORS[ i ];
 					for ( const m of wsPlace.entry.mats ) m.color.setHex( CLAY_COLORS[ i ] );
@@ -3918,7 +3918,7 @@ function renderWsChips() {
 const WS_TAB_HINTS = {
 	shape: '🧸 挑个形状开始 · 点色块上色 · 空白处拖动转圈 · 下面切换：雕刻🤏 装扮🎀',
 	sculpt: '🤏 点一下戳坑 · 划一划刻沟 · 🫧 是鼓包 · ⭕ 笔刷大小 · ↩️ 撤销上一笔',
-	deco: '🎀 货架拖部件按上去 · 点已放的拿起重放，拖离身体就收回',
+	deco: '🎀 货架拖部件按上去 · 这排色块管部件颜色 · 点已放的拿起重放，拖离收回',
 };
 
 // 切 tab：R2 内容行与主题色跟着换；离开装扮清上膛，进雕刻握起工具
@@ -3939,6 +3939,7 @@ function setWsTab( t ) {
 		selectWsShelf( null );
 
 	}
+	selectWsColor( t === 'deco' ? workshop.partColorIndex : ( workshop.cur ? workshop.cur.colorIndex : 0 ) );
 	setHint( WS_TAB_HINTS[ t ] );
 
 }
