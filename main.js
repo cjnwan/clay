@@ -116,9 +116,16 @@ const MODE_HINTS = {
 	paint: '🖌 选个颜色，在黏土上点一点、划一划上色 · 再点收手',
 };
 
+let hintFadeTimer = null;
+
 function setHint( text ) {
 
-	if ( hintEl ) hintEl.textContent = text;
+	if ( ! hintEl ) return;
+	hintEl.textContent = text;
+	// 提示牌久不变化就淡出，把画面还给作品（有新提示立即回来）
+	hintEl.classList.remove( 'faded' );
+	if ( hintFadeTimer ) clearTimeout( hintFadeTimer );
+	hintFadeTimer = setTimeout( () => hintEl.classList.add( 'faded' ), 8000 );
 
 }
 

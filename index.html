@@ -5,6 +5,36 @@
 	<title>捏黏土</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 	<style>
+		/* ============================================================
+		   设计 tokens：暖陶土工作台
+		   一切颜色向暖棕靠拢；阴影永远是暖的；动效快出缓收
+		   ============================================================ */
+		:root {
+			/* 表面 */
+			--clay-bg: #EFE0C8;            /* 场景米色（与 3D 背景一致） */
+			--tray-hi: #FDF5E5;            /* 托盘亮面 */
+			--tray-lo: #F5E6CB;            /* 托盘暗面 */
+			--surface: #FFFCF4;            /* 按钮亮面（无纯白） */
+			--surface-lo: #F8EDD9;         /* 按钮暗面 */
+			--ink: #6B4A2B;                /* 主墨色 */
+			--ink-soft: #8A6A44;           /* 次级墨色 */
+			/* 模式三色（颜色即模式，硬约束） */
+			--mode-shape: #7DBBE0;
+			--mode-sculpt: #E8A05C;
+			--mode-deco: #F2A7C4;
+			/* 暖阴影（禁冷黑） */
+			--shadow-warm: rgba(122, 90, 54, 0.28);
+			--shadow-soft: rgba(122, 90, 54, 0.16);
+			--edge-warm: rgba(122, 90, 54, 0.10);
+			/* 圆角 & 动效 */
+			--r-tray: 30px;
+			--r-row: 18px;
+			--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+			--dur-press: 0.16s;
+			--dur-panel: 0.4s;
+			/* 触达下限（4 岁胖手指，硬约束 ≥44pt） */
+			--tap: 44px;
+		}
 
 		* { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -12,7 +42,7 @@
 
 		body {
 			overflow: hidden;
-			background: #efe0c8;
+			background: var(--clay-bg);
 			font-family: ui-rounded, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
 			user-select: none;
 			-webkit-user-select: none;
@@ -22,79 +52,141 @@
 
 		canvas { display: block; touch-action: none; }
 
+		/* 暖晕影：把视线聚回转盘中心，零成本的空间纵深 */
+		#vignette {
+			position: fixed;
+			inset: 0;
+			pointer-events: none;
+			z-index: 1;
+			background: radial-gradient(120% 90% at 50% 42%, transparent 58%, rgba(122, 90, 54, 0.09) 100%);
+		}
+
 		#title {
 			position: fixed;
-			top: max(16px, env(safe-area-inset-top));
-			left: 22px;
-			font-size: 30px;
+			top: max(14px, env(safe-area-inset-top));
+			left: 18px;
+			z-index: 3;
+			font-size: 22px;
 			font-weight: 800;
-			color: #7a5a36;
-			letter-spacing: 3px;
+			color: #7A5A36;
+			letter-spacing: 2px;
 			transform: rotate(-2deg);
-			text-shadow: 0 2px 0 #ffffff88;
+			text-shadow: 0 2px 0 rgba(255, 253, 247, 0.6);
 			pointer-events: none;
 		}
 
 		#title small {
 			display: block;
-			font-size: 11px;
+			font-size: 9px;
 			font-weight: 500;
-			letter-spacing: 1px;
-			opacity: 0.6;
+			letter-spacing: 0.5px;
+			opacity: 0.4;
 		}
 
+		/* 提示：一块小告示牌，不再是横跨全屏的文字墙 */
 		#hint {
 			position: fixed;
-			bottom: 148px;
-			width: 100%;
-			padding: 0 16px;
+			bottom: 150px;
+			left: 50%;
+			transform: translateX(-50%);
+			width: max-content;
+			max-width: min(90vw, 520px);
+			padding: 8px 16px;
+			z-index: 4;
 			text-align: center;
-			color: #8a6a44;
-			font-size: 14px;
-			opacity: 0.85;
+			color: var(--ink-soft);
+			font-size: 13px;
+			line-height: 1.55;
+			background: rgba(255, 252, 244, 0.9);
+			border-radius: 16px 18px 17px 15px;
+			box-shadow: 0 3px 12px var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+			pointer-events: none;
+			transition: opacity 0.3s var(--ease-out);
+		}
+
+		#hint:empty { opacity: 0; }
+
+		/* ============================================================
+		   工作台托盘：UI 都摆在这块"木案板"上，不再悬浮
+		   ============================================================ */
+		#palette, #workshopBar {
+			position: fixed;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			margin: 0 auto;
+			width: min(100%, 720px);
+			z-index: 5;
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+			align-items: center;
+			padding: 10px 8px max(10px, env(safe-area-inset-bottom));
+			background:
+				linear-gradient(var(--tray-hi), var(--tray-lo));
+			border-radius: var(--r-tray) calc(var(--r-tray) - 6px) 0 0;
+			box-shadow:
+				0 -10px 32px var(--shadow-soft),
+				inset 0 2px 0 rgba(255, 255, 255, 0.75),
+				inset 0 -12px 24px rgba(122, 90, 54, 0.05);
+			transition: transform var(--dur-panel) var(--ease-out), opacity var(--dur-panel) var(--ease-out), visibility var(--dur-panel);
+		}
+
+		/* 板⇄工坊转场：托盘沉下去再浮上来，跟相机飞行同拍 */
+		#palette.hidden, #workshopBar.hidden {
+			transform: translateY(110%);
+			opacity: 0;
+			visibility: hidden;
 			pointer-events: none;
 		}
 
-		#palette, #workshopBar {
-			position: fixed;
-			bottom: max(16px, env(safe-area-inset-bottom));
-			left: 0;
-			width: 100vw;
-			display: flex;
-			flex-direction: column;
-			gap: 7px;
-			align-items: center;
-			padding: 0 8px;
-		}
-
-		#palette.hidden, #workshopBar.hidden { display: none; }
-
+		/* 行：单排横滑（溢出时），两端 margin:auto 实现"能居中就居中" */
 		.prow {
 			display: flex;
-			justify-content: center;
-			flex-wrap: wrap;
-			gap: clamp(3px, 0.5vw, 10px);
-			max-width: 100vw;
+			flex-wrap: nowrap;
+			justify-content: flex-start;
+			gap: clamp(6px, 1.2vw, 10px);
+			max-width: 100%;
+			overflow-x: auto;
+			padding: 3px 6px;
+			-webkit-overflow-scrolling: touch;
+			scrollbar-width: none;
 		}
 
-		#colorRow button, #wsColorRow button { width: clamp(24px, 4.3vw, 44px); box-shadow: 0 4px 10px #00000033, inset 0 -6px 8px #00000022, inset 0 0 0 1.5px #00000018; }
+		.prow::-webkit-scrollbar { display: none; }
 
+		.prow > :first-child { margin-left: auto; }
+
+		.prow > :last-child { margin-right: auto; }
+
+		.prow button { flex: 0 0 auto; }
+
+		/* 按钮：从黏土里捏出来的暖白圆钮（≥44pt 触达） */
 		#palette button, #workshopBar button {
-			width: clamp(25px, 4.9vw, 54px);
+			width: clamp(var(--tap), 11vw, 56px);
 			height: auto;
 			aspect-ratio: 1 / 1;
 			border-radius: 50%;
-			border: 4px solid #fff;
-			background: #fff;
-			box-shadow: 0 4px 10px #00000033, inset 0 -6px 8px #00000022;
+			border: 3px solid rgba(255, 253, 247, 0.95);
+			background: linear-gradient(var(--surface), var(--surface-lo));
+			box-shadow:
+				0 3px 10px var(--shadow-warm),
+				inset 0 -5px 8px rgba(122, 90, 54, 0.12);
 			font-size: clamp(18px, 4.5vw, 26px);
 			line-height: 1;
 			cursor: pointer;
 			touch-action: none;
-			transition: transform 0.15s;
+			transform: rotate(var(--rot, 0deg));
+			transition: transform var(--dur-press) var(--ease-out), box-shadow var(--dur-press) var(--ease-out);
 		}
 
-		#palette button, #workshopBar button { transform: rotate(var(--rot, 0deg)); }
+		#colorRow button, #wsColorRow button {
+			width: clamp(var(--tap), 10.5vw, 50px);
+			box-shadow:
+				0 3px 9px var(--shadow-warm),
+				inset 0 -6px 8px rgba(122, 90, 54, 0.2),
+				inset 0 0 0 1.5px rgba(122, 90, 54, 0.1);
+		}
 
 		#palette button svg, #workshopBar button svg {
 			width: 78%;
@@ -105,78 +197,81 @@
 		}
 
 		#palette button.selected, #workshopBar button.selected {
-			transform: rotate(var(--rot, 0deg)) scale(1.2);
-			box-shadow: 0 6px 14px #00000044, 0 0 0 4px #ffffffaa, inset 0 -6px 8px #00000022;
+			transform: rotate(var(--rot, 0deg)) scale(1.18);
+			box-shadow:
+				0 6px 16px var(--shadow-warm),
+				0 0 0 4px rgba(255, 253, 247, 0.95),
+				0 0 0 6px rgba(122, 90, 54, 0.15),
+				inset 0 -5px 8px rgba(122, 90, 54, 0.12);
 		}
 
-		#palette button:active, #workshopBar button:active { transform: rotate(var(--rot, 0deg)) scale(0.92); }
+		#palette button:active, #workshopBar button:active {
+			transform: rotate(var(--rot, 0deg)) scale(0.92) translateY(1px);
+			box-shadow:
+				0 1px 4px var(--shadow-warm),
+				inset 0 -3px 6px rgba(122, 90, 54, 0.14);
+		}
 
 		#clearBtn.holding { animation: holdfill 0.7s linear forwards; }
 
 		#demoBtn.armed { animation: armedpulse 0.6s ease-in-out infinite alternate; }
 
 		@keyframes armedpulse {
-			to { transform: scale(1.22); box-shadow: 0 0 0 5px #f6d155cc, 0 6px 14px #00000044; }
+			to { transform: scale(1.2); box-shadow: 0 0 0 5px rgba(246, 209, 85, 0.85), 0 6px 14px var(--shadow-warm); }
 		}
 
 		@keyframes holdfill {
-			to { transform: scale(1.28); background: #f6d155; box-shadow: 0 0 0 6px #ffffffaa, 0 6px 14px #00000044; }
+			to { transform: scale(1.26); background: #F6D155; box-shadow: 0 0 0 6px rgba(255, 253, 247, 0.85), 0 6px 14px var(--shadow-warm); }
 		}
 
-		@media (pointer: coarse) {
-			#palette button { width: clamp(28px, 4.9vw, 58px); }
-			#hint { bottom: 160px; }
-		}
+		/* ============================================================
+		   工坊：R2 内容行随 tab 换色（颜色即模式，浓度拉到一眼可辨）
+		   ============================================================ */
+		#workshopBar .wsrow { display: none; border-radius: var(--r-row); padding: 4px 10px; }
 
-		@media (max-width: 640px) {
-			#hint { bottom: 190px; }
-		}
+		#workshopBar[data-tab="shape"] #wsShapeRow { display: flex; background: color-mix(in srgb, var(--mode-shape) 30%, transparent); }
 
-		/* 工坊条有三行，提示文字上移别被挡住 */
-		body.ws #hint { bottom: 224px; }
+		#workshopBar[data-tab="sculpt"] #wsSculptRow { display: flex; background: color-mix(in srgb, var(--mode-sculpt) 32%, transparent); }
 
-		/* 工坊 tab：R2 内容行随 data-tab 切换；主题色 = 模式（形状蓝/雕刻橙/装扮粉） */
-		#workshopBar .wsrow { display: none; border-radius: 20px; padding: 5px 10px; }
-		#workshopBar[data-tab="shape"] #wsShapeRow { display: flex; background: #7dbbe022; }
-		#workshopBar[data-tab="sculpt"] #wsSculptRow { display: flex; background: #e8a05c2c; }
-		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: #f2a7c42a; }
+		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: color-mix(in srgb, var(--mode-deco) 34%, transparent); }
+
+		/* 托盘顶缘同步染一道模式色光 */
+		#workshopBar[data-tab="shape"] { box-shadow: 0 -10px 32px var(--shadow-soft), inset 0 3px 0 color-mix(in srgb, var(--mode-shape) 55%, white), inset 0 -12px 24px rgba(122, 90, 54, 0.05); }
+
+		#workshopBar[data-tab="sculpt"] { box-shadow: 0 -10px 32px var(--shadow-soft), inset 0 3px 0 color-mix(in srgb, var(--mode-sculpt) 55%, white), inset 0 -12px 24px rgba(122, 90, 54, 0.05); }
+
+		#workshopBar[data-tab="deco"] { box-shadow: 0 -10px 32px var(--shadow-soft), inset 0 3px 0 color-mix(in srgb, var(--mode-deco) 55%, white), inset 0 -12px 24px rgba(122, 90, 54, 0.05); }
+
 		#workshopBar[data-tab="sculpt"] #wsColorRow { opacity: 0.45; }
 
-		/* 内容行按钮多了横向滑动翻页，不加行（形状行 12 个、部件行 14 个） */
-		#wsShapeRow, #wsPartRow {
-			flex-wrap: nowrap;
-			overflow-x: auto;
-			justify-content: flex-start;
-			-webkit-overflow-scrolling: touch;
-			scrollbar-width: none;
-			max-width: min(96vw, 640px);
+		/* R0 块架：一条浅浅的木槽，块们睡在里面 */
+		#wsChipRow {
+			background: rgba(122, 90, 54, 0.07);
+			border-radius: 999px;
+			padding: 5px 10px;
+			min-height: 54px;
 		}
 
-		#wsShapeRow::-webkit-scrollbar, #wsPartRow::-webkit-scrollbar { display: none; }
-
-		#wsShapeRow button, #wsPartRow button { flex: 0 0 auto; }
-
-		/* R0 块架：chip = 块的实时缩略图；长按收走时复用 holdfill 填充动画 */
 		#wsChipRow button.chip {
-			background-color: #fff;
+			background-color: var(--surface);
 			background-size: cover;
 			background-position: center;
-			animation: chipin 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+			animation: chipin 0.3s var(--ease-out);
 		}
 
 		@keyframes chipin {
-			from { transform: rotate(var(--rot, 0deg)) scale(0.2); }
+			from { transform: rotate(var(--rot, 0deg)) scale(0.2); opacity: 0; }
 		}
 
 		#wsChipRow button.holding { animation: holdfill 0.7s linear forwards; }
 
-		/* 分段 tab 控件：相连胶囊，和圆形动作钮长得明显不同 */
+		/* 分段 tab：当前模式 = 实色胶囊，隔屏都认得出 */
 		#wsTabs {
 			display: flex;
-			background: #ffffff;
+			background: linear-gradient(var(--surface), var(--surface-lo));
 			border-radius: 999px;
-			padding: 3px;
-			box-shadow: 0 4px 10px #00000033, inset 0 -4px 6px #00000014;
+			padding: 4px;
+			box-shadow: 0 3px 10px var(--shadow-warm), inset 0 -4px 6px rgba(122, 90, 54, 0.08);
 			gap: 2px;
 		}
 
@@ -186,28 +281,41 @@
 			background: transparent;
 			box-shadow: none;
 			transform: none;
-			width: clamp(34px, 6vw, 56px);
+			width: clamp(var(--tap), 11vw, 54px);
+			transition: background var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out);
 		}
 
-		#workshopBar #wsTabs button.selected { transform: none; }
-		#workshopBar[data-tab="shape"] #wsTabs button[data-tab="shape"] { background: #7dbbe055; box-shadow: inset 0 2px 4px #4a7da533; }
-		#workshopBar[data-tab="sculpt"] #wsTabs button[data-tab="sculpt"] { background: #e8a05c55; box-shadow: inset 0 2px 4px #b06f3333; }
-		#workshopBar[data-tab="deco"] #wsTabs button[data-tab="deco"] { background: #f2a7c455; box-shadow: inset 0 2px 4px #b26e8d33; }
+		#workshopBar #wsTabs button.selected { transform: scale(1.04); }
 
-		#palette.shake { animation: shake 0.3s; }
+		#workshopBar[data-tab="shape"] #wsTabs button[data-tab="shape"] { background: var(--mode-shape); box-shadow: inset 0 2px 3px rgba(58, 92, 120, 0.35), 0 1px 0 rgba(255,255,255,0.5); }
+
+		#workshopBar[data-tab="sculpt"] #wsTabs button[data-tab="sculpt"] { background: var(--mode-sculpt); box-shadow: inset 0 2px 3px rgba(140, 84, 30, 0.35), 0 1px 0 rgba(255,255,255,0.5); }
+
+		#workshopBar[data-tab="deco"] #wsTabs button[data-tab="deco"] { background: var(--mode-deco); box-shadow: inset 0 2px 3px rgba(150, 80, 110, 0.35), 0 1px 0 rgba(255,255,255,0.5); }
+
+		/* ✓ 完成：全场唯一的实色主按钮 */
+		#wsDoneBtn {
+			background: linear-gradient(#A9D68C, #7DBB5F) !important;
+			border-color: rgba(255, 253, 247, 0.95) !important;
+			box-shadow: 0 4px 12px rgba(93, 138, 62, 0.4), inset 0 -5px 8px rgba(74, 125, 56, 0.3) !important;
+		}
+
+		#wsDoneBtn:active { box-shadow: 0 1px 4px rgba(93, 138, 62, 0.4), inset 0 -3px 6px rgba(74, 125, 56, 0.3) !important; }
+
+		#palette.shake, #workshopBar.shake { animation: shake 0.3s; }
 
 		@keyframes shake {
 			25% { transform: translateX(-5px); }
 			75% { transform: translateX(5px); }
 		}
 
-		/* 贴件放好后的确认气泡：✓ 贴好 / ↺ 放回 */
+		/* 贴件确认气泡：✓ 贴好 / ↺ 放回 */
 		#confirmBar {
 			position: fixed;
 			display: flex;
 			gap: 14px;
 			transform: translateX(-50%);
-			z-index: 5;
+			z-index: 6;
 		}
 
 		#confirmBar.hidden { display: none; }
@@ -216,9 +324,9 @@
 			width: 56px;
 			height: 56px;
 			border-radius: 50%;
-			border: 4px solid #fff;
-			background: #fff;
-			box-shadow: 0 4px 10px #00000033, inset 0 -6px 8px #00000022;
+			border: 3px solid rgba(255, 253, 247, 0.95);
+			background: linear-gradient(var(--surface), var(--surface-lo));
+			box-shadow: 0 4px 12px var(--shadow-warm), inset 0 -6px 8px rgba(122, 90, 54, 0.12);
 			cursor: pointer;
 			touch-action: none;
 		}
@@ -234,7 +342,7 @@
 		#confirmYes { animation: confirmpulse 0.7s ease-in-out infinite alternate; }
 
 		@keyframes confirmpulse {
-			to { transform: scale(1.12); box-shadow: 0 0 0 5px #a8cf94aa, 0 6px 14px #00000044; }
+			to { transform: scale(1.12); box-shadow: 0 0 0 5px rgba(168, 207, 148, 0.75), 0 6px 14px var(--shadow-warm); }
 		}
 
 		#loading {
@@ -243,23 +351,59 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			background: #efe0c8;
-			color: #7a5a36;
-			font-size: 22px;
+			background: var(--clay-bg);
+			color: #7A5A36;
+			font-size: 21px;
+			font-weight: 600;
+			letter-spacing: 2px;
 			z-index: 10;
 			transition: opacity 0.5s;
 		}
 
+		#loading::before {
+			content: "";
+			width: 18px;
+			height: 18px;
+			margin-right: 12px;
+			border-radius: 46% 54% 52% 48% / 52% 44% 56% 48%;
+			background: #E0584B;
+			animation: knead 0.9s var(--ease-out) infinite alternate;
+		}
+
+		@keyframes knead {
+			to { transform: scale(1.35) rotate(28deg); border-radius: 54% 46% 48% 52% / 44% 56% 44% 56%; background: #F2A34D; }
+		}
+
 		#loading.hidden { opacity: 0; pointer-events: none; }
 
+		/* 尊重系统"减弱动态效果"：装饰性动画全部让位 */
+		@media (prefers-reduced-motion: reduce) {
+			*, *::before, *::after {
+				animation-duration: 0.01ms !important;
+				animation-iteration-count: 1 !important;
+				transition-duration: 0.01ms !important;
+			}
+		}
+
+		/* 提示条位置：托盘高度不同，板 / 工坊各自上浮；久不变化自动淡出还给画面 */
+		body.ws #hint { bottom: 268px; }
+
+		#hint.faded { opacity: 0.18; }
+
+		@media (max-height: 700px) {
+			#hint { bottom: 142px; }
+			body.ws #hint { bottom: 256px; }
+		}
 	</style>
 </head>
 <body>
 
+	<div id="vignette"></div>
+
 	<div id="loading">🥣 和泥中…</div>
 
 	<div id="title">捏黏土<small>three.js + box3d.js</small></div>
-	<div id="hint">点颜色加黏土 · 拖动搬家 · 靠近黏住 · 按住变形 · 拖住时：加一指捏合缩放旋转 · 🤸 翻跟头 · 双击拆开 · 拖出盘外收走 · ● 大小 · 🐍 小蛇 · 👀👄🎩 装饰 · 🤏✂️🖌 工具 · 🧸 手办工坊 · 🎬 表演 · 🎥 拍短片 · 🧹 按住清空 · 网址就是分享链接</div>
+	<div id="hint">点颜色加黏土 · 拖一拖、黏一黏 · 🧸 去工坊捏手办 · 🎬 看表演学捏法 · 网址就是分享链接</div>
 
 	<div id="palette">
 		<div class="prow" id="colorRow"></div>
