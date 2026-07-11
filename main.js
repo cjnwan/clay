@@ -2484,8 +2484,8 @@ function setupUI() {
 		e.preventDefault();
 		if ( ! workshop ) return;
 		ensureAudio();
-		workshop.brush = ( ( workshop.brush === undefined ? 1 : workshop.brush ) + 1 ) % 3;
-		brushSvg.style.transform = [ 'scale(0.6)', 'scale(0.85)', 'scale(1.12)' ][ workshop.brush ];
+		workshop.brush = ( ( workshop.brush === undefined ? 2 : workshop.brush ) + 1 ) % BRUSH_R.length;
+		brushSvg.style.transform = [ 'scale(0.42)', 'scale(0.62)', 'scale(0.85)', 'scale(1.12)' ][ workshop.brush ];
 		boing();
 
 	} );
@@ -3222,14 +3222,14 @@ function rebuildWsBody( piece, keepFitted ) {
 // 单点=戳一下；拖动=沿表面每隔一小段采样成沟/棱（拖动中只放预览珠，松手一次烘焙）。
 // 一次按-划-抬 = 一个笔画 = 一个撤销单元
 const MAX_SCULPT = 48;
-const BRUSH_R = [ 0.2, 0.3, 0.42 ]; // ⭕ 笔刷三档
+const BRUSH_R = [ 0.12, 0.19, 0.3, 0.42 ]; // ⭕ 笔刷四档：细工 / 小 / 中 / 大
 
 function sculptBallFrom( hit, type ) {
 
-	const r = BRUSH_R[ workshop.brush === undefined ? 1 : workshop.brush ];
-	// 坑心压进表面一点才咬得动，包心悬出一点才鼓得起来（随笔刷等比）。
-	// 命中在拉伸后的几何空间里，存储时把 y 除回 sy（烘焙先加雕刻球再拉伸）
-	const off = type === 1 ? r * 0.66 : r * 0.53;
+	const r = BRUSH_R[ workshop.brush === undefined ? 2 : workshop.brush ];
+	// 坑心压进表面一点才咬得动，包心悬出一点才鼓得起来（随笔刷等比，小笔刷=浅咬合可精修；
+	// 但负球太浅完全咬不动，给个保底嵌入量）。命中在拉伸后的几何空间，存储把 y 除回 sy
+	const off = type === 1 ? Math.max( 0.11, r * 0.66 ) : Math.max( 0.1, r * 0.53 );
 	const sy = workshop.cur.sy || 1;
 	return [
 		hit.lp.x + hit.ln.x * ( type === 1 ? off : - off ),
@@ -3284,7 +3284,7 @@ function wsAddBead( hit, mirrored ) {
 
 	}
 	const m = new THREE.Mesh( _beadGeo, wsSculptDrag.type === 1 ? _beadMatBump : _beadMatDent );
-	m.scale.setScalar( BRUSH_R[ workshop.brush === undefined ? 1 : workshop.brush ] / 0.3 ); // 珠子大小跟笔刷档
+	m.scale.setScalar( BRUSH_R[ workshop.brush === undefined ? 2 : workshop.brush ] / 0.3 ); // 珠子大小跟笔刷档
 	m.position.set( mirrored ? - hit.lp.x : hit.lp.x, hit.lp.y, hit.lp.z );
 	wsStage.figure.add( m );
 	wsSculptDrag.beads.push( m );
@@ -3297,14 +3297,38 @@ function wsSculptPointerMove( e ) {
 	setRay( e );
 	const hit = wsSurfaceHit( 'root' );
 	if ( ! hit ) return;
-	if ( wsSculptDrag.lastLp && hit.lp.distanceTo( wsSculptDrag.lastLp ) < 0.18 ) return;
+	const step = Math.max( 0.09, BRUSH_R[ workshop.brush === undefined ? 2 : workshop.brush ] * 0.6 );
+	if ( wsSculptDrag.lastLp && hit.lp.distanceTo( wsSculptDrag.lastLp ) < step ) return;
 	wsSculptDrag.lastLp = hit.lp.clone();
 	const n = wsPushSculpt( hit, wsSculptDrag.type );
 	if ( ! n ) return;
 	wsSculptDrag.count += n;
 	wsAddBead( hit, false );
 	if ( n === 2 ) wsAddBead( hit, true );
+
+	// 划的时候就能看到沟成形：低清（res 60）实时预烘；低端机烘一次太慢就退回珠子预览
+	const nowP = performance.now();
+	if ( wsSculptDrag.previewOk !== false && nowP - ( wsSculptDrag.lastBake || 0 ) > 130 ) {
+
+		wsSculptDrag.lastBake = nowP;
+		const t0 = performance.now();
+		wsPreviewBake( workshop.cur );
+		if ( performance.now() - t0 > 60 ) wsSculptDrag.previewOk = false;
+
+	}
 	dabTick();
+
+}
+
+// 雕刻中的轻量预烘：只换身体网格（低分辨率、不动头套/部件），松手后由完整重烘接管
+function wsPreviewBake( piece ) {
+
+	const { mesh } = bakeBodyMesh( BODY_TEMPLATES[ piece.tplIndex ], piece.bodyMat, 60, piece.sculpt.length ? piece.sculpt : null, piece.sy );
+	mesh.userData.piece = piece;
+	piece.group.remove( piece.figureMesh );
+	piece.figureMesh.geometry.dispose();
+	piece.figureMesh = mesh;
+	piece.group.add( mesh );
 
 }
 
@@ -3624,7 +3648,7 @@ function createFigure( fdRaw, x, baseY, z ) {
 
 function freshWorkshop() {
 
-	return { cur: null, shelf: [], partColorIndex: 6, yaw: 0, yawVel: 0, placing: null, tab: 'shape', sculptTool: null, sculptToolType: - 1, brush: 1 };
+	return { cur: null, shelf: [], partColorIndex: 6, yaw: 0, yawVel: 0, placing: null, tab: 'shape', sculptTool: null, sculptToolType: - 1, brush: 2 };
 
 }
 
