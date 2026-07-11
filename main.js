@@ -377,7 +377,8 @@ async function init() {
 	setupPointer();
 
 	// 优先恢复上次的作品（URL hash > localStorage），否则开场丢三团进来
-	if ( ! restoreScene() ) {
+	const restored = restoreScene();
+	if ( ! restored ) {
 
 		createClay( - 0.9, 3.0, 0.2, 0 );
 		createClay( 0.1, 3.8, - 0.4, 4 );
@@ -385,6 +386,14 @@ async function init() {
 
 	}
 	sceneDirty = false; // 刚恢复/开场的内容不算“用户改动”
+
+	// 工坊是主页：默认开进工坊；上次退出时在黏土板（或打开的是板上作品的分享链接）才落在板上
+	if ( ! restored || wsSavedSpace !== 0 ) {
+
+		enterWorkshop();
+		camBlend = 1; // 开场直接站在工坊，不做飞行转场
+
+	}
 
 	// 自动存档：改动后最多 3 秒落盘（后台被节流也无妨，切后台/关页时会立即存）
 	setInterval( () => { if ( sceneDirty ) saveScene(); }, 3000 );
@@ -872,9 +881,10 @@ function serializeScene() {
 			.map( ( j ) => [ idx.get( j.aId ), idx.get( j.bId ), j.chain ? 1 : 0 ] )
 			.filter( ( a ) => a[ 0 ] !== undefined && a[ 1 ] !== undefined ),
 	};
-	// 工坊里的半成品也随存档走（刷新回来接着捏）
+	// 工坊里的半成品也随存档走（刷新回来接着捏）；顺带记住人在哪边
 	const wd = wsFigData( workshop || wsKeep );
 	if ( wd ) out.w = wd;
+	out.sp = workshop ? 1 : 0;
 	return out;
 
 }
@@ -1004,6 +1014,7 @@ function saveScene() {
 }
 
 let wsSavedData = null;          // 存档里的工坊半成品配方，进工坊时还原
+let wsSavedSpace = null;         // 存档时人在哪边：1=工坊 0=黏土板（决定开场落点）
 
 function restoreScene() {
 
@@ -1014,6 +1025,7 @@ function restoreScene() {
 
 			const data = JSON.parse( atob( m[ 1 ].replace( /-/g, '+' ).replace( /_/g, '/' ) ) );
 			if ( data && data.w ) wsSavedData = data.w;
+			if ( data && ( data.sp === 0 || data.sp === 1 ) ) wsSavedSpace = data.sp;
 			if ( loadScene( data ) ) return true;
 
 		} catch ( err ) { /* hash 不合法就走下一级 */ }
@@ -1026,6 +1038,7 @@ function restoreScene() {
 
 			const data = JSON.parse( str );
 			if ( data && data.w ) wsSavedData = data.w;
+			if ( data && ( data.sp === 0 || data.sp === 1 ) ) wsSavedSpace = data.sp;
 			return loadScene( data );
 
 		}
@@ -2423,6 +2436,7 @@ function setupUI() {
 			p.sculpt = []; // 新泥胚从平整开始
 			p.sculptOps = [];
 			rebuildWsBody( p );
+			userTouched = true;
 			selectWsShape( i );
 			plop();
 
@@ -2526,6 +2540,7 @@ function setupUI() {
 		selectWsColor( p.colorIndex );
 		selectWsShape( p.tplIndex );
 		setWsTab( 'shape' ); // 引导"先选形状"
+		userTouched = true;
 		renderWsChips();
 		plop();
 
@@ -2588,6 +2603,7 @@ function setupUI() {
 
 			const p = workshop.cur;
 			p.colorIndex = i;
+			userTouched = true;
 			if ( p.bodyMat ) p.bodyMat.color.setHex( CLAY_COLORS[ i ] );
 			// 跟身体同色的部件（耳朵、小手）一起换：玩偶服是一体的
 			for ( const en of p.parts ) {
@@ -3146,6 +3162,7 @@ function wsPushSculpt( hit, type ) {
 	if ( p.sculpt.length >= MAX_SCULPT ) { shakePalette(); return 0; }
 	const b = sculptBallFrom( hit, type );
 	p.sculpt.push( b );
+	userTouched = true;
 	let n = 1;
 	if ( Math.abs( hit.lp.x ) > 0.12 && p.sculpt.length < MAX_SCULPT ) {
 
@@ -3250,6 +3267,7 @@ function wsUndoSculpt() {
 	if ( ! p || ! p.sculptOps.length ) return;
 	const n = p.sculptOps.pop();
 	p.sculpt.length = Math.max( 0, p.sculpt.length - n );
+	userTouched = true;
 	rebuildWsBody( p, true );
 	pop();
 
@@ -3762,6 +3780,7 @@ function wsSwapCurrent( piece ) {
 	selectWsShape( piece.tplIndex );
 	renderWsChips();
 	plop();
+	userTouched = true;
 	markDirty();
 
 }
@@ -3793,6 +3812,7 @@ function wireWsChip( btn, piece ) {
 			if ( i >= 0 ) workshop.shelf.splice( i, 1 );
 			if ( piece.figureMesh ) piece.figureMesh.geometry.dispose();
 			renderWsChips();
+			userTouched = true;
 			markDirty();
 			pop();
 
@@ -4202,6 +4222,7 @@ function wsFinishPiecePlace( en, valid ) {
 
 	}
 	renderWsChips();
+	userTouched = true;
 	markDirty();
 
 }
@@ -4226,6 +4247,7 @@ function wsPlacePointerUp( e ) {
 
 		wsSetGhost( en, false );
 		if ( ! en.piece.parts.includes( en ) ) en.piece.parts.push( en );
+		userTouched = true;
 		markDirty(); // 半成品也进自动存档
 		squish();
 
