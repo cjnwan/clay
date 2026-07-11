@@ -2414,14 +2414,15 @@ function setupUI() {
 		btn.addEventListener( 'pointerdown', ( e ) => {
 
 			e.preventDefault();
-			if ( ! workshop ) return;
+			if ( ! workshop || ! workshop.cur ) return;
 			ensureAudio();
 			const i = btn.dataset.shape | 0;
-			if ( i === workshop.tplIndex ) return;
-			workshop.tplIndex = i;
-			workshop.sculpt = []; // 新泥胚从平整开始
-			workshop.sculptOps = [];
-			rebuildWsBody();
+			const p = workshop.cur;
+			if ( i === p.tplIndex ) return;
+			p.tplIndex = i;
+			p.sculpt = []; // 新泥胚从平整开始
+			p.sculptOps = [];
+			rebuildWsBody( p );
 			selectWsShape( i );
 			plop();
 
@@ -2472,27 +2473,61 @@ function setupUI() {
 		boing();
 
 	} );
-	// ✓ 完成：手办变成黏土板上的一件玩具（单刚体），工坊清空迎接下一只
+	// ✓ 完成：转盘上的整个组装体变成黏土板上的一件玩具；块架上的块留在工坊
 	document.getElementById( 'wsDoneBtn' ).addEventListener( 'pointerdown', ( e ) => {
 
 		e.preventDefault();
-		if ( ! workshop || ! workshop.figureMesh || wsPlace ) return;
+		if ( ! workshop || ! workshop.cur || ! workshop.cur.figureMesh || wsPlace ) return;
 		ensureAudio();
-		const fd = wsFigData( workshop );
+		const fd = wsCurTreeData( workshop );
 
-		// 拆台清场：部件与身体从转盘摘掉
-		for ( const en of [ ...workshop.parts ] ) wsDiscardEntry( en );
-		wsStage.figure.remove( workshop.figureMesh );
-		workshop.figureMesh.geometry.dispose();
-		workshop.figureMesh = null;
-		exitWorkshop();
-		wsKeep = null; // 下次进来是新的一只
+		// 拆台：整棵组装树的网格从转盘摘掉并销毁
+		const disposeTree = ( p ) => {
+
+			for ( const c of [ ...p.children ] ) disposeTree( c );
+			for ( const en of [ ...p.parts ] ) wsDiscardEntry( en );
+			if ( p.figureMesh ) p.figureMesh.geometry.dispose();
+			if ( p.group.parent ) p.group.parent.remove( p.group );
+
+		};
+		disposeTree( workshop.cur );
+		workshop.cur = null;
+		const left = workshop.shelf.length;
+		exitWorkshop(); // 块架留在 wsKeep 里，下次接着用
 
 		createFigure( fd, ( Math.random() - 0.5 ) * 0.8, 0.4, ( Math.random() - 0.5 ) * 0.8 );
 		userTouched = true;
 		saveScene();
-		setHint( '🧸 它来啦！拖着玩、点一点跳、🎥 拍段短片吧' );
+		setHint( left ? `🧸 它来啦！工坊里还留着 ${ left } 块泥哦` : '🧸 它来啦！拖着玩、点一点跳、🎥 拍段短片吧' );
 		setTimeout( () => { if ( ! workshop ) resetHint(); }, 4000 );
+
+	} );
+
+	// R0 块架：[＋] 新块；点 chip 换上转盘；长按 chip 删除；拖 chip 出来=组装
+	document.getElementById( 'wsAddPieceBtn' ).addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop || wsPlace ) return;
+		ensureAudio();
+		if ( wsPieceCount() >= MAX_PIECES ) { shakePalette(); return; }
+		// 转盘上的现役块收进块架，摆一块新泥上台
+		if ( workshop.cur ) {
+
+			const old = workshop.cur;
+			wsStage.figure.remove( old.group );
+			old.attach = null;
+			workshop.shelf.push( old );
+			wsRefreshThumb( old );
+
+		}
+		const p = newPieceRec( 3, workshop.cur ? workshop.cur.colorIndex : 9 ); // 默认圆球
+		rebuildWsBody( p );
+		mountCurPiece( p );
+		selectWsColor( p.colorIndex );
+		selectWsShape( p.tplIndex );
+		setWsTab( 'shape' ); // 引导"先选形状"
+		renderWsChips();
+		plop();
 
 	} );
 	// 部件货架：点一下上膛（下一按放置），直接拖出来立即开始放
@@ -2530,16 +2565,16 @@ function setupUI() {
 		btn.addEventListener( 'pointerdown', ( e ) => {
 
 			e.preventDefault();
-			if ( ! workshop ) return;
+			if ( ! workshop || ! workshop.cur ) return;
 			ensureAudio();
 
 			// 上膛/正在放的是色片这类"自带颜色"的部件：点色块只是换颜料，不动身体
 			const placingOwn = ( workshop.placing && PARTS[ workshop.placing ].role === 'own' )
-				|| ( wsPlace && wsPlace.entry.role === 'own' );
+				|| ( wsPlace && ! wsPlace.entry.kind && wsPlace.entry.role === 'own' );
 			if ( placingOwn ) {
 
 				workshop.partColorIndex = i;
-				if ( wsPlace && wsPlace.entry.role === 'own' ) {
+				if ( wsPlace && ! wsPlace.entry.kind && wsPlace.entry.role === 'own' ) {
 
 					wsPlace.entry.colorHex = CLAY_COLORS[ i ];
 					for ( const m of wsPlace.entry.mats ) m.color.setHex( CLAY_COLORS[ i ] );
@@ -2551,10 +2586,11 @@ function setupUI() {
 
 			}
 
-			workshop.colorIndex = i;
-			if ( workshop.bodyMat ) workshop.bodyMat.color.setHex( CLAY_COLORS[ i ] );
+			const p = workshop.cur;
+			p.colorIndex = i;
+			if ( p.bodyMat ) p.bodyMat.color.setHex( CLAY_COLORS[ i ] );
 			// 跟身体同色的部件（耳朵、小手）一起换：玩偶服是一体的
-			for ( const en of workshop.parts ) {
+			for ( const en of p.parts ) {
 
 				if ( en.role === 'body' ) for ( const m of en.mats ) m.color.setHex( CLAY_COLORS[ i ] );
 
@@ -2990,53 +3026,91 @@ const DEMO_RECIPES = [
 
 // ---------- 🧸 手办工坊：转盘台上搭 Q 版手办（无重力、精确放置） ----------
 
-function rebuildWsBody( keepFitted ) {
+// ---------- 块（Piece）：工坊的基本单位。转盘上一个根块（可带挂接子树），块架上若干自由块 ----------
 
-	const w = workshop;
-	if ( ! w || ! wsStage ) return;
+const MAX_PIECES = 6;
+
+function newPieceRec( tplIndex, colorIndex ) {
+
+	return {
+		tplIndex, colorIndex,
+		sculpt: [], sculptOps: [], parts: [],
+		figureMesh: null, bodyMat: null, bakeY0: 0,
+		group: new THREE.Group(),
+		attach: null,   // null=自由/根块；{ parent, lp, ln, k, spin }=挂接（父块局部系）
+		children: [],   // 挂在我身上的块（group 嵌套，跟着一起动）
+		thumb: null,    // 块架缩略图 dataURL
+	};
+
+}
+
+function wsPieceCount() {
+
+	let n = 0;
+	const walk = ( p ) => { n ++; for ( const c of p.children ) walk( c ); };
+	if ( workshop.cur ) walk( workshop.cur );
+	for ( const p of workshop.shelf ) walk( p );
+	return n;
+
+}
+
+// 把挂接位姿写到块的 group 上（父块局部系）：底面(+Y)贴着表面法线站，绕法线自转 spin
+function applyPieceAttach( piece ) {
+
+	const a = piece.attach;
+	if ( ! a ) return;
+	const minR = Math.min( ...BODY_TEMPLATES[ piece.tplIndex ].balls.map( ( b ) => b.r ) );
+	piece.group.position.copy( a.lp ).addScaledVector( a.ln, - minR * a.k * 0.15 ); // 微嵌进去像按进泥里
+	piece.group.quaternion.setFromUnitVectors( UP, a.ln );
+	if ( a.spin ) piece.group.quaternion.premultiply( _q.setFromAxisAngle( a.ln, a.spin ) );
+	piece.group.scale.setScalar( a.k );
+
+}
+
+function rebuildWsBody( piece, keepFitted ) {
+
+	if ( ! piece || ! wsStage ) return;
 
 	// 头套等合身部件是按旧身体剪的：换身体丢弃；雕刻后按新身体重新剪一件（颜色不变）
 	const refit = [];
-	if ( w.parts ) {
+	for ( const en of [ ...piece.parts ] ) {
 
-		for ( const en of [ ...w.parts ] ) {
+		if ( PARTS[ en.partId ].fitted ) {
 
-			if ( PARTS[ en.partId ].fitted ) {
-
-				if ( keepFitted ) refit.push( { partId: en.partId, colorHex: en.colorHex } );
-				wsDiscardEntry( en );
-
-			}
+			if ( keepFitted ) refit.push( { partId: en.partId, colorHex: en.colorHex } );
+			wsDiscardEntry( en );
 
 		}
 
 	}
 
-	if ( w.figureMesh ) {
+	if ( piece.figureMesh ) {
 
-		wsStage.figure.remove( w.figureMesh );
-		w.figureMesh.geometry.dispose();
+		piece.group.remove( piece.figureMesh );
+		piece.figureMesh.geometry.dispose();
 
 	}
-	if ( ! w.bodyMat ) {
+	if ( ! piece.bodyMat ) {
 
-		w.bodyMat = new THREE.MeshPhysicalMaterial( {
-			color: CLAY_COLORS[ w.colorIndex ],
+		piece.bodyMat = new THREE.MeshPhysicalMaterial( {
+			color: CLAY_COLORS[ piece.colorIndex ],
 			roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
 		} );
 
 	}
-	const { mesh, y0 } = bakeBodyMesh( BODY_TEMPLATES[ w.tplIndex ], w.bodyMat, 88, w.sculpt && w.sculpt.length ? w.sculpt : null );
-	w.figureMesh = mesh;
-	w.bakeY0 = y0;
-	wsStage.figure.add( mesh );
+	const { mesh, y0 } = bakeBodyMesh( BODY_TEMPLATES[ piece.tplIndex ], piece.bodyMat, 88, piece.sculpt.length ? piece.sculpt : null );
+	mesh.userData.piece = piece; // 组装命中时反查所属块
+	piece.figureMesh = mesh;
+	piece.bakeY0 = y0;
+	piece.group.add( mesh );
 
 	for ( const f of refit ) {
 
-		const built = buildHoodPart( mesh.geometry, BODY_TEMPLATES[ w.tplIndex ], y0, f.colorHex );
-		wsStage.figure.add( built.group );
-		w.parts.push( {
-			partId: f.partId, role: 'own', colorHex: f.colorHex, k: 1, fitted: true,
+		const built = buildHoodPart( mesh.geometry, BODY_TEMPLATES[ piece.tplIndex ], y0, f.colorHex );
+		built.mesh.userData.piece = piece;
+		piece.group.add( built.group );
+		piece.parts.push( {
+			partId: f.partId, role: 'own', colorHex: f.colorHex, k: 1, fitted: true, piece,
 			lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 0, 1 ),
 			group: built.group, mesh: built.mesh, mats: [ ...built.mats ],
 			twinGroup: null, twinMesh: null,
@@ -3068,14 +3142,14 @@ function sculptBallFrom( hit, type ) {
 
 function wsPushSculpt( hit, type ) {
 
-	if ( ! workshop.sculpt ) workshop.sculpt = [];
-	if ( workshop.sculpt.length >= MAX_SCULPT ) { shakePalette(); return 0; }
+	const p = workshop.cur;
+	if ( p.sculpt.length >= MAX_SCULPT ) { shakePalette(); return 0; }
 	const b = sculptBallFrom( hit, type );
-	workshop.sculpt.push( b );
+	p.sculpt.push( b );
 	let n = 1;
-	if ( Math.abs( hit.lp.x ) > 0.12 && workshop.sculpt.length < MAX_SCULPT ) {
+	if ( Math.abs( hit.lp.x ) > 0.12 && p.sculpt.length < MAX_SCULPT ) {
 
-		workshop.sculpt.push( [ - b[ 0 ], b[ 1 ], b[ 2 ], type, b[ 4 ] ] ); // 左右对称，跟部件一致
+		p.sculpt.push( [ - b[ 0 ], b[ 1 ], b[ 2 ], type, b[ 4 ] ] ); // 左右对称，跟部件一致
 		n = 2;
 
 	}
@@ -3086,12 +3160,11 @@ function wsPushSculpt( hit, type ) {
 // 单点雕刻（也是调试钩子的入口）
 function wsSculptAt( hit, type ) {
 
-	if ( ! workshop ) return;
+	if ( ! workshop || ! workshop.cur ) return;
 	const n = wsPushSculpt( hit, type );
 	if ( ! n ) return;
-	if ( ! workshop.sculptOps ) workshop.sculptOps = [];
-	workshop.sculptOps.push( n );
-	rebuildWsBody( true );
+	workshop.cur.sculptOps.push( n );
+	rebuildWsBody( workshop.cur, true );
 	if ( type === 1 ) boing(); else squish();
 
 }
@@ -3121,7 +3194,7 @@ function wsSculptPointerMove( e ) {
 
 	if ( ! wsSculptDrag || e.pointerId !== wsSculptDrag.id || ! workshop ) return;
 	setRay( e );
-	const hit = wsSurfaceHit();
+	const hit = wsSurfaceHit( 'root' );
 	if ( ! hit ) return;
 	if ( wsSculptDrag.lastLp && hit.lp.distanceTo( wsSculptDrag.lastLp ) < 0.18 ) return;
 	wsSculptDrag.lastLp = hit.lp.clone();
@@ -3143,10 +3216,10 @@ function wsSculptPointerUp( e ) {
 	window.removeEventListener( 'pointerup', wsSculptPointerUp );
 	window.removeEventListener( 'pointercancel', wsSculptPointerUp );
 	for ( const b of d.beads ) wsStage.figure.remove( b );
-	if ( d.count && workshop ) {
+	if ( d.count && workshop && workshop.cur ) {
 
-		( workshop.sculptOps = workshop.sculptOps || [] ).push( d.count );
-		rebuildWsBody( true );
+		workshop.cur.sculptOps.push( d.count );
+		rebuildWsBody( workshop.cur, true );
 		if ( d.type === 1 ) boing(); else squish();
 
 	}
@@ -3173,10 +3246,11 @@ function beginWsSculpt( e, hit ) {
 // 按笔画撤销：弹出最后一笔的所有雕刻球并重烘焙
 function wsUndoSculpt() {
 
-	if ( ! workshop || ! workshop.sculptOps || ! workshop.sculptOps.length ) return;
-	const n = workshop.sculptOps.pop();
-	workshop.sculpt.length = Math.max( 0, workshop.sculpt.length - n );
-	rebuildWsBody( true );
+	const p = workshop && workshop.cur;
+	if ( ! p || ! p.sculptOps.length ) return;
+	const n = p.sculptOps.pop();
+	p.sculpt.length = Math.max( 0, p.sculpt.length - n );
+	rebuildWsBody( p, true );
 	pop();
 
 }
@@ -3186,20 +3260,67 @@ function wsUndoSculpt() {
 const _num = ( v, d ) => ( Number.isFinite( + v ) ? + v : d );
 const _ci = ( v ) => THREE.MathUtils.clamp( _num( v, 0 ) | 0, 0, CLAY_COLORS.length - 1 );
 
-// 工坊当前手办 → 可序列化配方（无内容返回 null）
-function wsFigData( w ) {
+// 单块 → 可序列化配方（不含挂接，挂接由 treeData 按下标补）
+function pieceData( p ) {
 
-	if ( ! w || ! w.figureMesh ) return null;
-	const fd = {
-		t: w.tplIndex, c: w.colorIndex,
-		ps: w.parts.map( ( en ) => ( {
+	const d = {
+		s: p.tplIndex, c: p.colorIndex,
+		ps: p.parts.map( ( en ) => ( {
 			p: en.partId, k: r3( en.k ), c: Math.max( 0, CLAY_COLORS.indexOf( en.colorHex ) ),
 			lp: [ r3( en.lp.x ), r3( en.lp.y ), r3( en.lp.z ) ],
 			ln: [ r3( en.ln.x ), r3( en.ln.y ), r3( en.ln.z ) ],
 		} ) ),
 	};
-	if ( w.sculpt && w.sculpt.length ) fd.s = w.sculpt.map( ( d ) => [ r3( d[ 0 ] ), r3( d[ 1 ] ), r3( d[ 2 ] ), d[ 3 ] === 1 ? 1 : - 1, r3( d[ 4 ] || 0.3 ) ] );
-	return fd;
+	if ( p.sculpt.length ) d.sc = p.sculpt.map( ( b ) => [ r3( b[ 0 ] ), r3( b[ 1 ] ), r3( b[ 2 ] ), b[ 3 ] === 1 ? 1 : - 1, r3( b[ 4 ] || 0.3 ) ] );
+	return d;
+
+}
+
+// 一片森林 → 扁平列表（at.p = 父块在列表中的下标）
+function treeData( roots ) {
+
+	const list = [];
+	const walk = ( piece, parentIdx ) => {
+
+		const d = pieceData( piece );
+		if ( piece.attach && parentIdx >= 0 ) {
+
+			const a = piece.attach;
+			d.at = { p: parentIdx, lp: [ r3( a.lp.x ), r3( a.lp.y ), r3( a.lp.z ) ], ln: [ r3( a.ln.x ), r3( a.ln.y ), r3( a.ln.z ) ], k: r3( a.k ), spin: r3( a.spin || 0 ) };
+
+		}
+		const i = list.push( d ) - 1;
+		for ( const c of piece.children ) walk( c, i );
+
+	};
+	for ( const r of roots ) walk( r, - 1 );
+	return list;
+
+}
+
+// 工坊全量存档（转盘树 + 块架）；无内容返回 null
+function wsFigData( w ) {
+
+	if ( ! w || ( ! w.cur && ! ( w.shelf && w.shelf.length ) ) ) return null;
+	const roots = [ ...( w.cur ? [ w.cur ] : [] ), ...( w.shelf || [] ) ];
+	return { v: 2, cur: w.cur ? 0 : - 1, pieces: treeData( roots ) };
+
+}
+
+// ✓ 完成用：只带转盘上的当前组装体
+function wsCurTreeData( w ) {
+
+	return w && w.cur ? { v: 2, cur: 0, pieces: treeData( [ w.cur ] ) } : null;
+
+}
+
+// 旧单块存档（{t,c,ps,s}）→ v2；已是 v2 原样返回
+function migrateFigData( fd ) {
+
+	if ( ! fd ) return null;
+	if ( fd.v === 2 && Array.isArray( fd.pieces ) ) return fd;
+	if ( fd.t === undefined && ! Array.isArray( fd.ps ) ) return null;
+	return { v: 2, cur: 0, pieces: [ { s: fd.t, c: fd.c, ps: fd.ps, sc: fd.s } ] };
 
 }
 
@@ -3215,44 +3336,32 @@ function sanitizeSculpt( s ) {
 
 }
 
-// 配方 → 黏土板上的手办：一块 kind:'figure' 刚体（每个模板球一个 sphere 碰撞体），
-// 网格组挂在 rec.mesh 上由 syncEyes 通用同步。拖拽/弹跳/定型/焊接/拍短片全部照常适用
-function createFigure( fd, x, baseY, z ) {
+// 把一份块配方烘成网格组（含部件），返回 { group, template, y0 }。lp/ln 都在块局部系
+function buildPieceGroupFromData( pd ) {
 
-	if ( ! fd || balls.filter( ( r ) => r.kind === 'figure' ).length >= 4 ) { shakePalette(); return null; }
-
-	const tpl = THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 );
+	const tpl = THREE.MathUtils.clamp( _num( pd.s !== undefined ? pd.s : pd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 );
 	const template = BODY_TEMPLATES[ tpl ];
 	const mat = new THREE.MeshPhysicalMaterial( {
-		color: CLAY_COLORS[ _ci( fd.c ) ],
+		color: CLAY_COLORS[ _ci( pd.c ) ],
 		roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.5, envMapIntensity: 0.5,
 	} );
-	const sculpt = sanitizeSculpt( fd.s );
+	const sculpt = sanitizeSculpt( pd.sc );
 	const { mesh: bodyMesh, y0 } = bakeBodyMesh( template, mat, 88, sculpt.length ? sculpt : null );
+	const pieceG = new THREE.Group();
+	pieceG.add( bodyMesh );
 
-	// 身高与中心：刚体原点放在半身高处，拾取球才罩得住整只
-	let topY = 0;
-	for ( const b of template.balls ) topY = Math.max( topY, b.o[ 1 ] + b.r - y0 );
-	const cy = topY / 2;
+	for ( const ppd of ( Array.isArray( pd.ps ) ? pd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
 
-	const inner = new THREE.Group();
-	inner.position.y = - cy;
-	inner.add( bodyMesh );
-	const group = new THREE.Group();
-	group.add( inner );
-
-	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
-
-		if ( ! pd || ! PARTS[ pd.p ] ) continue;
-		const def = PARTS[ pd.p ];
-		const colorHex = CLAY_COLORS[ _ci( pd.c ) ];
-		const k = def.fitted ? 1 : THREE.MathUtils.clamp( _num( pd.k, 1 ), 0.45, 2 );
+		if ( ! ppd || ! PARTS[ ppd.p ] ) continue;
+		const def = PARTS[ ppd.p ];
+		const colorHex = CLAY_COLORS[ _ci( ppd.c ) ];
+		const k = def.fitted ? 1 : THREE.MathUtils.clamp( _num( ppd.k, 1 ), 0.45, 2 );
 		const lp = def.fitted ? new THREE.Vector3() : new THREE.Vector3(
-			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 0 ], 0 ), - 3, 3 ),
-			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 1 ], 0 ), - 3, 3 ),
-			THREE.MathUtils.clamp( _num( pd.lp && pd.lp[ 2 ], 0 ), - 3, 3 ) );
+			THREE.MathUtils.clamp( _num( ppd.lp && ppd.lp[ 0 ], 0 ), - 3, 3 ),
+			THREE.MathUtils.clamp( _num( ppd.lp && ppd.lp[ 1 ], 0 ), - 3, 3 ),
+			THREE.MathUtils.clamp( _num( ppd.lp && ppd.lp[ 2 ], 0 ), - 3, 3 ) );
 		const ln = def.fitted ? new THREE.Vector3( 0, 0, 1 ) : new THREE.Vector3(
-			_num( pd.ln && pd.ln[ 0 ], 0 ), _num( pd.ln && pd.ln[ 1 ], 0 ), _num( pd.ln && pd.ln[ 2 ], 1 ) );
+			_num( ppd.ln && ppd.ln[ 0 ], 0 ), _num( ppd.ln && ppd.ln[ 1 ], 0 ), _num( ppd.ln && ppd.ln[ 2 ], 1 ) );
 		if ( ln.lengthSq() < 1e-6 ) ln.set( 0, 0, 1 );
 		ln.normalize();
 
@@ -3260,22 +3369,110 @@ function createFigure( fd, x, baseY, z ) {
 
 			const built = def.fitted
 				? buildHoodPart( bodyMesh.geometry, template, y0, colorHex )
-				: buildPart( pd.p, colorHex );
+				: buildPart( ppd.p, colorHex );
 			built.group.position.set( px, lp.y, lp.z );
 			_v.set( nx, ln.y, ln.z );
 			built.group.quaternion.setFromUnitVectors( Z_OUT, _v );
 			built.group.scale.setScalar( k );
-			inner.add( built.group );
+			pieceG.add( built.group );
 
 		};
 		place( lp.x, ln.x );
 		if ( def.paired && Math.abs( lp.x ) > 0.1 ) place( - lp.x, - ln.x );
 
 	}
+	return { group: pieceG, template, y0 };
 
+}
+
+// 存档里的挂接字段 → 干净的 { lp, ln, k, spin }
+function sanitizeAttach( at ) {
+
+	const lp = new THREE.Vector3(
+		THREE.MathUtils.clamp( _num( at.lp && at.lp[ 0 ], 0 ), - 4, 4 ),
+		THREE.MathUtils.clamp( _num( at.lp && at.lp[ 1 ], 0 ), - 4, 4 ),
+		THREE.MathUtils.clamp( _num( at.lp && at.lp[ 2 ], 0 ), - 4, 4 ) );
+	const ln = new THREE.Vector3( _num( at.ln && at.ln[ 0 ], 0 ), _num( at.ln && at.ln[ 1 ], 1 ), _num( at.ln && at.ln[ 2 ], 0 ) );
+	if ( ln.lengthSq() < 1e-6 ) ln.set( 0, 1, 0 );
+	ln.normalize();
+	return { lp, ln, k: THREE.MathUtils.clamp( _num( at.k, 1 ), 0.3, 2.2 ), spin: THREE.MathUtils.clamp( _num( at.spin, 0 ), - 7, 7 ) };
+
+}
+
+// 挂接位姿（父块局部系）：底面(+Y)对齐法线 + 绕法线自转 + 微嵌
+function setAttachTransform( g, a, template ) {
+
+	const minR = Math.min( ...template.balls.map( ( b ) => b.r ) );
+	g.position.copy( a.lp ).addScaledVector( a.ln, - minR * a.k * 0.15 );
+	g.quaternion.setFromUnitVectors( UP, a.ln );
+	if ( a.spin ) g.quaternion.premultiply( _q.setFromAxisAngle( a.ln, a.spin ) );
+	g.scale.setScalar( a.k );
+
+}
+
+// 配方（v2 多块或旧单块）→ 黏土板上的手办：一块 kind:'figure' 刚体。
+// 复合碰撞体 = 各块模板球经挂接链变换后取半径最大的 16 颗；异常回退单球
+function createFigure( fdRaw, x, baseY, z ) {
+
+	const fd = migrateFigData( fdRaw );
+	if ( ! fd || ! Array.isArray( fd.pieces ) || ! fd.pieces.length ) return null;
+	if ( balls.filter( ( r ) => r.kind === 'figure' ).length >= 4 ) { shakePalette(); return null; }
+
+	const list = fd.pieces.slice( 0, MAX_PIECES );
+	const rootG = new THREE.Group();
+	const builtList = [];
+	for ( let i = 0; i < list.length; i ++ ) {
+
+		const pd = list[ i ];
+		if ( ! pd ) { builtList.push( null ); continue; }
+		const b = buildPieceGroupFromData( pd );
+		const at = pd.at;
+		const parent = at && Number.isInteger( at.p ) && at.p < i ? builtList[ at.p ] : null;
+		if ( i === 0 || ! parent ) {
+
+			if ( i > 0 && ! at ) { builtList.push( null ); continue; } // 多余的自由根块不进手办
+			rootG.add( b.group );
+
+		} else {
+
+			b.at = sanitizeAttach( at );
+			setAttachTransform( b.group, b.at, b.template );
+			parent.group.add( b.group );
+
+		}
+		builtList.push( b );
+
+	}
+	rootG.updateMatrixWorld( true );
+
+	// 碰撞球：模板球心（块局部）→ 装配局部
+	const spheres = [];
+	let topY = 0;
+	for ( const b of builtList ) {
+
+		if ( ! b ) continue;
+		const ws = b.group.getWorldScale( _v2 ).x;
+		for ( const ball of b.template.balls ) {
+
+			_v.set( ball.o[ 0 ], ball.o[ 1 ] - b.y0, ball.o[ 2 ] ).applyMatrix4( b.group.matrixWorld );
+			const r = ball.r * ws;
+			spheres.push( { x: _v.x, y: _v.y, z: _v.z, r } );
+			topY = Math.max( topY, _v.y + r );
+
+		}
+
+	}
+	spheres.sort( ( a, b ) => b.r - a.r );
+	spheres.length = Math.min( spheres.length, 16 );
+	const cy = Math.max( 0.4, topY / 2 );
+
+	const inner = new THREE.Group();
+	inner.position.y = - cy;
+	inner.add( rootG );
+	const group = new THREE.Group();
+	group.add( inner );
 	scene.add( group );
 
-	// 物理：每个模板球一个 sphere（复合形状撑起大致轮廓）；异常时退回单球
 	const bd = b3.b3DefaultBodyDef();
 	bd.type = b3.b3BodyType.b3_dynamicBody;
 	bd.position = { x, y: baseY + cy, z };
@@ -3286,14 +3483,15 @@ function createFigure( fd, x, baseY, z ) {
 	let shape = null;
 	try {
 
-		for ( const b of template.balls ) {
+		for ( const s of spheres ) {
 
 			shape = b3.b3CreateSphereShape( body, sd, {
-				center: { x: b.o[ 0 ], y: b.o[ 1 ] - y0 - cy, z: b.o[ 2 ] },
-				radius: b.r * 0.92,
+				center: { x: s.x, y: s.y - cy, z: s.z },
+				radius: s.r * 0.92,
 			} );
 
 		}
+		if ( ! shape ) throw new Error( 'no spheres' );
 
 	} catch ( err ) {
 
@@ -3317,34 +3515,90 @@ function createFigure( fd, x, baseY, z ) {
 
 }
 
-// 从存档配方还原工坊里的半成品
-function restoreWorkshop( fd ) {
+function freshWorkshop() {
 
-	workshop = { tplIndex: THREE.MathUtils.clamp( _num( fd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ), colorIndex: _ci( fd.c ), partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: sanitizeSculpt( fd.s ), sculptOps: [], tab: 'shape', sculptToolType: - 1, brush: 1 };
-	if ( workshop.sculpt.length ) workshop.sculptOps = [ workshop.sculpt.length ]; // 还原后整段算一笔，仍可撤销
-	rebuildWsBody();
-	for ( const pd of ( Array.isArray( fd.ps ) ? fd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
+	return { cur: null, shelf: [], partColorIndex: 6, yaw: 0, yawVel: 0, placing: null, tab: 'shape', sculptTool: null, sculptToolType: - 1, brush: 1 };
 
-		if ( ! pd || ! PARTS[ pd.p ] ) continue;
-		workshop.partColorIndex = _ci( pd.c );
-		const en = wsAddPartEntry( pd.p );
+}
+
+// 把块摆上转盘（成为根块）：位姿归零、脱离挂接
+function mountCurPiece( piece ) {
+
+	piece.attach = null;
+	piece.group.position.set( 0, 0, 0 );
+	piece.group.quaternion.identity();
+	piece.group.scale.setScalar( 1 );
+	wsStage.figure.add( piece.group );
+	workshop.cur = piece;
+
+}
+
+// 单块配方 → 工坊的活块（可继续编辑）
+function buildPieceRec( pd ) {
+
+	const piece = newPieceRec(
+		THREE.MathUtils.clamp( _num( pd.s !== undefined ? pd.s : pd.t, 0 ) | 0, 0, BODY_TEMPLATES.length - 1 ),
+		_ci( pd.c ) );
+	piece.sculpt = sanitizeSculpt( pd.sc );
+	if ( piece.sculpt.length ) piece.sculptOps = [ piece.sculpt.length ]; // 还原后整段算一笔，仍可撤销
+	rebuildWsBody( piece );
+	const keepPci = workshop.partColorIndex;
+	for ( const ppd of ( Array.isArray( pd.ps ) ? pd.ps : [] ).slice( 0, MAX_WS_PARTS ) ) {
+
+		if ( ! ppd || ! PARTS[ ppd.p ] ) continue;
+		workshop.partColorIndex = _ci( ppd.c );
+		const en = wsAddPartEntry( piece, ppd.p );
 		if ( ! en ) break;
-		en.colorHex = CLAY_COLORS[ _ci( pd.c ) ];
+		en.colorHex = CLAY_COLORS[ _ci( ppd.c ) ];
 		for ( const m of en.mats ) if ( en.role !== 'fixed' ) m.color.setHex( en.colorHex );
 		if ( ! en.fitted ) {
 
-			en.k = THREE.MathUtils.clamp( _num( pd.k, 1 ), 0.45, 2 );
-			en.lp.set( _num( pd.lp && pd.lp[ 0 ], 0 ), _num( pd.lp && pd.lp[ 1 ], 0 ), _num( pd.lp && pd.lp[ 2 ], 0 ) ).clampScalar( - 3, 3 );
-			en.ln.set( _num( pd.ln && pd.ln[ 0 ], 0 ), _num( pd.ln && pd.ln[ 1 ], 0 ), _num( pd.ln && pd.ln[ 2 ], 1 ) );
+			en.k = THREE.MathUtils.clamp( _num( ppd.k, 1 ), 0.45, 2 );
+			en.lp.set( _num( ppd.lp && ppd.lp[ 0 ], 0 ), _num( ppd.lp && ppd.lp[ 1 ], 0 ), _num( ppd.lp && ppd.lp[ 2 ], 0 ) ).clampScalar( - 3, 3 );
+			en.ln.set( _num( ppd.ln && ppd.ln[ 0 ], 0 ), _num( ppd.ln && ppd.ln[ 1 ], 0 ), _num( ppd.ln && ppd.ln[ 2 ], 1 ) );
 			if ( en.ln.lengthSq() < 1e-6 ) en.ln.set( 0, 0, 1 );
 			en.ln.normalize();
 
 		}
 		applyWsPose( en );
-		workshop.parts.push( en );
+		piece.parts.push( en );
 
 	}
-	workshop.partColorIndex = 6;
+	workshop.partColorIndex = keepPci;
+	return piece;
+
+}
+
+// 从存档还原整个工坊（转盘树 + 块架）
+function restoreWorkshop( sdRaw ) {
+
+	const sd = migrateFigData( sdRaw );
+	if ( ! sd ) return;
+	workshop = freshWorkshop();
+	const list = sd.pieces.slice( 0, MAX_PIECES );
+	const recs = [];
+	for ( let i = 0; i < list.length; i ++ ) {
+
+		const pd = list[ i ];
+		if ( ! pd ) { recs.push( null ); continue; }
+		const piece = buildPieceRec( pd );
+		const at = pd.at;
+		const parent = at && Number.isInteger( at.p ) && at.p < i ? recs[ at.p ] : null;
+		if ( parent ) {
+
+			piece.attach = Object.assign( { parent }, sanitizeAttach( at ) );
+			parent.children.push( piece );
+			parent.group.add( piece.group );
+			applyPieceAttach( piece );
+
+		}
+		recs.push( piece );
+
+	}
+	const roots = recs.filter( ( p ) => p && ! p.attach );
+	let cur = Number.isInteger( sd.cur ) && sd.cur >= 0 && recs[ sd.cur ] && ! recs[ sd.cur ].attach ? recs[ sd.cur ] : ( roots[ 0 ] || null );
+	workshop.shelf = roots.filter( ( p ) => p !== cur );
+	if ( cur ) mountCurPiece( cur );
 
 }
 
@@ -3367,11 +3621,27 @@ function enterWorkshop() {
 		wsSavedData = null;
 
 	}
-	if ( ! workshop ) workshop = { tplIndex: 0, colorIndex: 9, partColorIndex: 6, yaw: 0, yawVel: 0, bodyMat: null, figureMesh: null, parts: [], placing: null, sculpt: [], sculptOps: [], tab: 'shape', sculptToolType: - 1, brush: 1 };
-	if ( ! workshop.figureMesh ) rebuildWsBody();
-	selectWsColor( workshop.colorIndex );
-	selectWsShape( workshop.tplIndex );
+	if ( ! workshop ) workshop = freshWorkshop();
+	if ( ! workshop.cur ) {
+
+		if ( workshop.shelf.length ) {
+
+			mountCurPiece( workshop.shelf.shift() );
+
+		} else {
+
+			const p = newPieceRec( 0, 9 );
+			rebuildWsBody( p );
+			mountCurPiece( p );
+
+		}
+
+	}
+	if ( ! workshop.cur.figureMesh ) rebuildWsBody( workshop.cur );
+	selectWsColor( workshop.cur.colorIndex );
+	selectWsShape( workshop.cur.tplIndex );
 	setWsTab( workshop.tab || 'shape' );
+	renderWsChips();
 	document.getElementById( 'palette' ).classList.add( 'hidden' );
 	document.getElementById( 'workshopBar' ).classList.remove( 'hidden' );
 	document.body.classList.add( 'ws' ); // hint 由 setWsTab 按当前 tab 给
@@ -3384,7 +3654,7 @@ function exitWorkshop() {
 	wsCancelPlace();
 	workshop.placing = null;
 	selectWsShelf( null );
-	wsKeep = workshop; // 半成品留着，回来接着捏
+	wsKeep = workshop; // 半成品（转盘+块架）留着，回来接着捏
 	workshop = null;
 	wsDrag = null;
 	document.getElementById( 'palette' ).classList.remove( 'hidden' );
@@ -3411,6 +3681,169 @@ function selectWsShape( i ) {
 		el.classList.toggle( 'selected', ( el.dataset.shape | 0 ) === i );
 
 	} );
+
+}
+
+// ---------- R0 块架：自由块以实时缩略图 chip 的形式排在面板顶行 ----------
+
+let _thumbRT = null, _thumbCam = null, _thumbCanvas = null;
+
+// 给（自由）块拍一张 96×96 透明底证件照：挪到地板下的隐蔽拍照位，用主渲染器渲一帧读回
+function wsRefreshThumb( piece ) {
+
+	if ( ! renderer || ! piece.figureMesh ) return;
+	const SIZE = 96;
+	if ( ! _thumbRT ) {
+
+		_thumbRT = new THREE.WebGLRenderTarget( SIZE, SIZE );
+		_thumbCam = new THREE.PerspectiveCamera( 35, 1, 0.1, 60 );
+		_thumbCanvas = document.createElement( 'canvas' );
+		_thumbCanvas.width = _thumbCanvas.height = SIZE;
+
+	}
+	const prevParent = piece.group.parent;
+	scene.add( piece.group );
+	piece.group.position.set( 100, - 60, 0 );
+	piece.group.quaternion.identity();
+	piece.group.scale.setScalar( 1 );
+	piece.group.updateMatrixWorld( true );
+
+	const box = new THREE.Box3().setFromObject( piece.group );
+	const c = box.getCenter( new THREE.Vector3() );
+	const s = Math.max( 0.6, box.getSize( new THREE.Vector3() ).length() );
+	_thumbCam.position.set( c.x + s * 0.3, c.y + s * 0.35, c.z + s * 0.85 );
+	_thumbCam.lookAt( c );
+
+	const prevBG = scene.background, prevFog = scene.fog;
+	scene.background = null;
+	scene.fog = null;
+	renderer.setRenderTarget( _thumbRT );
+	renderer.setClearColor( 0x000000, 0 );
+	renderer.clear();
+	renderer.render( scene, _thumbCam );
+	const buf = new Uint8Array( SIZE * SIZE * 4 );
+	renderer.readRenderTargetPixels( _thumbRT, 0, 0, SIZE, SIZE, buf );
+	renderer.setRenderTarget( null );
+	scene.background = prevBG;
+	scene.fog = prevFog;
+
+	const ctx = _thumbCanvas.getContext( '2d' );
+	const img = ctx.createImageData( SIZE, SIZE );
+	for ( let y = 0; y < SIZE; y ++ ) {
+
+		img.data.set( buf.subarray( ( SIZE - 1 - y ) * SIZE * 4, ( SIZE - y ) * SIZE * 4 ), y * SIZE * 4 );
+
+	}
+	ctx.putImageData( img, 0, 0 );
+	piece.thumb = _thumbCanvas.toDataURL();
+
+	scene.remove( piece.group );
+	piece.group.position.set( 0, 0, 0 );
+	if ( prevParent ) prevParent.add( piece.group );
+
+}
+
+// 点 chip 换上转盘：现役的整棵树收回块架
+function wsSwapCurrent( piece ) {
+
+	const i = workshop.shelf.indexOf( piece );
+	if ( i < 0 ) return;
+	workshop.shelf.splice( i, 1 );
+	if ( workshop.cur ) {
+
+		const old = workshop.cur;
+		wsStage.figure.remove( old.group );
+		workshop.shelf.push( old );
+		wsRefreshThumb( old );
+
+	}
+	mountCurPiece( piece );
+	selectWsColor( piece.colorIndex );
+	selectWsShape( piece.tplIndex );
+	renderWsChips();
+	plop();
+	markDirty();
+
+}
+
+function wireWsChip( btn, piece ) {
+
+	btn.addEventListener( 'pointerdown', ( e ) => {
+
+		e.preventDefault();
+		if ( ! workshop || wsPlace || wsShelf ) return;
+		ensureAudio();
+		const x0 = e.clientX, y0 = e.clientY, id = e.pointerId;
+		let done = false;
+		const cleanup = () => {
+
+			clearTimeout( holdTimer );
+			btn.classList.remove( 'holding' );
+			window.removeEventListener( 'pointermove', move );
+			window.removeEventListener( 'pointerup', up );
+			window.removeEventListener( 'pointercancel', up );
+
+		};
+		// 长按 0.7s = 收走这块泥（同 🧹 的填充动画）
+		const holdTimer = setTimeout( () => {
+
+			done = true;
+			cleanup();
+			const i = workshop.shelf.indexOf( piece );
+			if ( i >= 0 ) workshop.shelf.splice( i, 1 );
+			if ( piece.figureMesh ) piece.figureMesh.geometry.dispose();
+			renderWsChips();
+			markDirty();
+			pop();
+
+		}, 700 );
+		btn.classList.add( 'holding' );
+		const move = ( ev ) => {
+
+			if ( ev.pointerId !== id || done ) return;
+			if ( Math.hypot( ev.clientX - x0, ev.clientY - y0 ) > 14 ) {
+
+				done = true;
+				cleanup();
+				beginWsPiecePlace( ev, piece ); // 拖出来 = 往身上装
+
+			}
+
+		};
+		const up = ( ev ) => {
+
+			if ( ev.pointerId !== id || done ) return;
+			done = true;
+			cleanup();
+			wsSwapCurrent( piece ); // 点一下 = 换它上台
+
+		};
+		window.addEventListener( 'pointermove', move );
+		window.addEventListener( 'pointerup', up );
+		window.addEventListener( 'pointercancel', up );
+
+	} );
+
+}
+
+function renderWsChips() {
+
+	const row = document.getElementById( 'wsChipRow' );
+	if ( ! row || ! workshop ) return;
+	row.querySelectorAll( 'button.chip' ).forEach( ( el ) => el.remove() );
+	const addBtn = document.getElementById( 'wsAddPieceBtn' );
+	for ( const piece of workshop.shelf ) {
+
+		if ( ! piece.thumb ) wsRefreshThumb( piece );
+		const btn = document.createElement( 'button' );
+		btn.className = 'chip';
+		if ( piece.thumb ) btn.style.backgroundImage = 'url(' + piece.thumb + ')';
+		btn.title = '点一下换它上台 · 拖出来装到身上 · 按住收走';
+		wireWsChip( btn, piece );
+		row.insertBefore( btn, addBtn );
+
+	}
+	row.style.display = workshop.shelf.length || wsPieceCount() > 1 ? 'flex' : '';
 
 }
 
@@ -3445,44 +3878,83 @@ function setWsTab( t ) {
 // ---------- 工坊部件放置：射线打在烘焙身体上，部件沿表面滑动，成对自动镜像 ----------
 
 // 身体表面命中（figure 局部系）：点 + 平滑法线（面三顶点法线平均）
-function wsSurfaceHit() {
+// 遍历当前转盘树
+function wsWalkTree( fn ) {
 
-	if ( ! workshop || ! workshop.figureMesh ) return null;
-	// 穿了头套后部件长在头套表面上；脸开口处露出身体，命中自然回落到身体
-	const targets = [ workshop.figureMesh ];
-	for ( const en of workshop.parts ) {
+	const walk = ( p ) => { fn( p ); for ( const c of p.children ) walk( c ); };
+	if ( workshop.cur ) walk( workshop.cur );
 
-		if ( en.fitted && ( ! wsPlace || wsPlace.entry !== en ) ) targets.push( en.mesh );
+}
+
+// 表面命中：返回 { piece, lp, ln }（都在命中块的局部系）。
+// scope='root' 只打当前根块（雕刻/部件默认落点仍可打全树），'tree' 打整棵组装树；
+// excludePiece 用于拖块组装时排除自己（含子树）
+function wsSurfaceHit( scope, excludePiece ) {
+
+	if ( ! workshop || ! workshop.cur ) return null;
+	const targets = [];
+	const collect = ( p ) => {
+
+		if ( p.figureMesh ) targets.push( p.figureMesh );
+		// 穿了头套后部件长在头套表面上；脸开口处露出身体，命中自然回落到身体
+		for ( const en of p.parts ) {
+
+			if ( en.fitted && ( ! wsPlace || wsPlace.entry !== en ) ) targets.push( en.mesh );
+
+		}
+
+	};
+	const inSubtree = ( p, root ) => {
+
+		for ( let q = p; q; q = q.attach && q.attach.parent ) if ( q === root ) return true;
+		return false;
+
+	};
+	if ( scope === 'root' ) {
+
+		collect( workshop.cur );
+
+	} else {
+
+		wsWalkTree( ( p ) => {
+
+			if ( excludePiece && inSubtree( p, excludePiece ) ) return;
+			collect( p );
+
+		} );
 
 	}
+	if ( ! targets.length ) return null;
 	const hits = raycaster.intersectObjects( targets, false );
 	if ( ! hits.length ) return null;
 	const h = hits[ 0 ];
+	const piece = h.object.userData.piece || workshop.cur;
 	const na = h.object.geometry.getAttribute( 'normal' );
 	_v.set( 0, 0, 0 );
 	for ( const idx of [ h.face.a, h.face.b, h.face.c ] ) _v.add( _v2.fromBufferAttribute( na, idx ) );
 	_v.normalize();
-	// 身体/头套在 figure 里都没有额外旋转：对象空间法线即 figure 局部法线
-	return { lp: wsStage.figure.worldToLocal( h.point.clone() ), ln: _v.clone() };
+	// 身体/头套在块 group 里没有额外旋转：对象空间法线即块局部法线
+	return { piece, lp: piece.group.worldToLocal( h.point.clone() ), ln: _v.clone() };
 
 }
 
-// 新建部件条目（成对部件带镜像孪生）
-function wsAddPartEntry( partId ) {
+// 新建部件条目（成对部件带镜像孪生），归属指定块
+function wsAddPartEntry( piece, partId ) {
 
-	if ( workshop.parts.length >= MAX_WS_PARTS ) { shakePalette(); return null; }
+	if ( piece.parts.length >= MAX_WS_PARTS ) { shakePalette(); return null; }
 	const def = PARTS[ partId ];
 	// 头套只有"有头"的模板穿得上（基础形状没有头）
-	if ( def.fitted && ! BODY_TEMPLATES[ workshop.tplIndex ].headed ) { shakePalette(); return null; }
-	const colorHex = CLAY_COLORS[ def.role === 'own' ? workshop.partColorIndex : workshop.colorIndex ];
+	if ( def.fitted && ! BODY_TEMPLATES[ piece.tplIndex ].headed ) { shakePalette(); return null; }
+	const colorHex = CLAY_COLORS[ def.role === 'own' ? workshop.partColorIndex : piece.colorIndex ];
 
 	// 头套：按当前身体现做现剪
 	const a = def.fitted
-		? buildHoodPart( workshop.figureMesh.geometry, BODY_TEMPLATES[ workshop.tplIndex ], workshop.bakeY0, colorHex )
+		? buildHoodPart( piece.figureMesh.geometry, BODY_TEMPLATES[ piece.tplIndex ], piece.bakeY0, colorHex )
 		: buildPart( partId, colorHex );
-	wsStage.figure.add( a.group );
+	if ( def.fitted ) a.mesh.userData.piece = piece;
+	piece.group.add( a.group );
 	const entry = {
-		partId, role: def.role, colorHex, k: 1, fitted: !! def.fitted,
+		partId, role: def.role, colorHex, k: 1, fitted: !! def.fitted, piece,
 		lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 0, 1 ),
 		group: a.group, mesh: a.mesh, mats: [ ...a.mats ],
 		twinGroup: null, twinMesh: null,
@@ -3490,13 +3962,25 @@ function wsAddPartEntry( partId ) {
 	if ( def.paired ) {
 
 		const b = buildPart( partId, colorHex );
-		wsStage.figure.add( b.group );
+		piece.group.add( b.group );
 		entry.twinGroup = b.group;
 		entry.twinMesh = b.mesh;
 		entry.mats.push( ...b.mats );
 
 	}
 	return entry;
+
+}
+
+// 部件换宿主块（拖着部件从一块滑到另一块上）
+function wsRehostEntry( en, piece ) {
+
+	if ( en.piece === piece ) return;
+	piece.group.add( en.group ); // three 的 add 自动从旧父级摘下
+	if ( en.twinGroup ) piece.group.add( en.twinGroup );
+	const i = en.piece.parts.indexOf( en );
+	if ( i >= 0 ) en.piece.parts.splice( i, 1 );
+	en.piece = piece;
 
 }
 
@@ -3535,29 +4019,57 @@ function wsSetGhost( en, ghost ) {
 
 }
 
-// 点到已放置的部件？（身体更近时让位给转盘拖拽）
+// 点到已放置的部件或已挂接的子块？（根块身体更近时让位给转盘拖拽）
+// 返回 { part } | { piece } | null
 function pickWsPart() {
 
 	const hits = raycaster.intersectObject( wsStage.figure, true );
+	const allParts = [];
+	wsWalkTree( ( p ) => allParts.push( ...p.parts ) );
 	for ( const h of hits ) {
 
-		if ( h.object === workshop.figureMesh ) return null;
+		if ( workshop.cur && h.object === workshop.cur.figureMesh ) return null;
 		if ( h.object.userData.isPart ) {
 
-			for ( const en of workshop.parts ) {
+			for ( const en of allParts ) {
 
+				// 头套是 fitted 部件但当作"块的皮肤"：命中头套算命中它的块
+				if ( en.fitted && ( h.object === en.mesh || h.object.parent === en.group ) ) {
+
+					return en.piece === workshop.cur ? null : { piece: en.piece };
+
+				}
 				for ( let o = h.object; o && o !== wsStage.figure; o = o.parent ) {
 
-					if ( o === en.group || o === en.twinGroup ) return en;
+					if ( o === en.group || o === en.twinGroup ) return { part: en };
 
 				}
 
 			}
 
 		}
+		// 命中挂接子块的身体：拿起这个块
+		const piece = h.object.userData.piece;
+		if ( piece && piece !== workshop.cur ) return { piece };
 
 	}
 	return null;
+
+}
+
+// 块的幽灵态：整组网格半透明
+function wsSetPieceGhost( piece, ghost ) {
+
+	piece.group.traverse( ( o ) => {
+
+		if ( o.isMesh ) {
+
+			o.material.transparent = ghost;
+			o.material.opacity = ghost ? 0.72 : 1;
+
+		}
+
+	} );
 
 }
 
@@ -3565,19 +4077,46 @@ function wsPlaceMoveTo( e ) {
 
 	setRay( e );
 	const en = wsPlace.entry;
-	const hit = wsSurfaceHit();
+
+	// 拖块组装：命中树上任意表面就试穿挂接
+	if ( en.kind === 'piece' ) {
+
+		const hit = wsSurfaceHit( 'tree', en.piece );
+		if ( hit ) {
+
+			if ( Math.abs( hit.lp.x ) < 0.16 ) hit.lp.x *= 0.25; // 中线软吸附（头装得正）
+			en.parent = hit.piece;
+			en.lp.copy( hit.lp );
+			en.ln.copy( hit.ln );
+			hit.piece.group.add( en.piece.group );
+			setAttachTransform( en.piece.group, en, BODY_TEMPLATES[ en.piece.tplIndex ] );
+			en.piece.group.visible = true;
+			wsPlace.valid = true;
+
+		} else {
+
+			en.piece.group.visible = false;
+			wsPlace.valid = false;
+
+		}
+		return;
+
+	}
+
+	const hit = wsSurfaceHit( 'tree' );
 	if ( hit ) {
 
 		const def = PARTS[ en.partId ];
 		if ( en.fitted ) {
 
-			// 头套是合身的：指着身体就穿上（位姿固定），拖开才脱下
+			// 头套是合身的：指着组装体就穿上（位姿固定在自己那块上），拖开才脱下
 			en.lp.set( 0, 0, 0 );
 			en.ln.set( 0, 0, 1 );
 			en.k = 1;
 
 		} else {
 
+			if ( ! en.fitted && hit.piece !== en.piece ) wsRehostEntry( en, hit.piece ); // 滑到别的块上就归它
 			if ( def.centerSnap && Math.abs( hit.lp.x ) < 0.16 ) hit.lp.x *= 0.25; // 中线软吸附（鼻子、肚兜放得正）
 			en.ln.copy( hit.ln );
 			en.lp.copy( hit.lp ).addScaledVector( hit.ln, - def.sink * en.k );
@@ -3599,12 +4138,29 @@ function wsPlaceMoveTo( e ) {
 function wsPlacePointerMove( e ) {
 
 	if ( ! wsPlace || ! workshop ) return;
+	const en = wsPlace.entry;
 	if ( wsPlace.pinch && e.pointerId === wsPlace.pinch.id2 ) {
 
-		// 第二指：捏合调部件大小
-		const d = Math.max( 1, Math.hypot( e.clientX - wsPlace.x, e.clientY - wsPlace.y ) );
-		wsPlace.entry.k = THREE.MathUtils.clamp( wsPlace.pinch.startK * d / wsPlace.pinch.startDist, 0.45, 2 );
-		applyWsPose( wsPlace.entry );
+		// 第二指：捏距调大小；对块再加上夹角=绕法线自转
+		const P = wsPlace.pinch;
+		const dx = e.clientX - wsPlace.x, dy = e.clientY - wsPlace.y;
+		const d = Math.max( 1, Math.hypot( dx, dy ) );
+		en.k = THREE.MathUtils.clamp( P.startK * d / P.startDist, en.kind === 'piece' ? 0.3 : 0.45, en.kind === 'piece' ? 2.2 : 2 );
+		if ( en.kind === 'piece' ) {
+
+			const a = Math.atan2( dy, dx );
+			let dA = a - P.lastAngle;
+			if ( dA > Math.PI ) dA -= Math.PI * 2;
+			if ( dA < - Math.PI ) dA += Math.PI * 2;
+			P.lastAngle = a;
+			en.spin = ( en.spin || 0 ) - dA;
+			if ( wsPlace.valid ) setAttachTransform( en.piece.group, en, BODY_TEMPLATES[ en.piece.tplIndex ] );
+
+		} else {
+
+			applyWsPose( en );
+
+		}
 		return;
 
 	}
@@ -3616,10 +4172,37 @@ function wsPlacePointerMove( e ) {
 
 function wsDiscardEntry( en ) {
 
-	wsStage.figure.remove( en.group );
-	if ( en.twinGroup ) wsStage.figure.remove( en.twinGroup );
-	const i = workshop.parts.indexOf( en );
-	if ( i >= 0 ) workshop.parts.splice( i, 1 );
+	en.piece.group.remove( en.group );
+	if ( en.twinGroup ) en.piece.group.remove( en.twinGroup );
+	const i = en.piece.parts.indexOf( en );
+	if ( i >= 0 ) en.piece.parts.splice( i, 1 );
+
+}
+
+// 块放置收尾：valid=挂上去，否则回块架（块是劳动成果，永不蒸发）
+function wsFinishPiecePlace( en, valid ) {
+
+	const piece = en.piece;
+	wsSetPieceGhost( piece, false );
+	if ( valid && en.parent ) {
+
+		piece.attach = { parent: en.parent, lp: en.lp.clone(), ln: en.ln.clone(), k: en.k, spin: en.spin || 0 };
+		en.parent.children.push( piece );
+		piece.group.visible = true;
+		squish();
+
+	} else {
+
+		if ( piece.group.parent ) piece.group.parent.remove( piece.group );
+		piece.group.visible = true;
+		piece.attach = null;
+		workshop.shelf.push( piece );
+		wsRefreshThumb( piece );
+		pop();
+
+	}
+	renderWsChips();
+	markDirty();
 
 }
 
@@ -3629,10 +4212,20 @@ function wsPlacePointerUp( e ) {
 	if ( wsPlace.pinch && e.pointerId === wsPlace.pinch.id2 ) { wsPlace.pinch = null; return; }
 	if ( e.pointerId !== wsPlace.id ) return;
 	const en = wsPlace.entry;
-	if ( wsPlace.valid ) {
+	const valid = wsPlace.valid;
+	wsPlace = null;
+	window.removeEventListener( 'pointermove', wsPlacePointerMove );
+	window.removeEventListener( 'pointerup', wsPlacePointerUp );
+	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
+
+	if ( en.kind === 'piece' ) {
+
+		wsFinishPiecePlace( en, valid );
+
+	} else if ( valid ) {
 
 		wsSetGhost( en, false );
-		if ( ! workshop.parts.includes( en ) ) workshop.parts.push( en );
+		if ( ! en.piece.parts.includes( en ) ) en.piece.parts.push( en );
 		markDirty(); // 半成品也进自动存档
 		squish();
 
@@ -3643,21 +4236,42 @@ function wsPlacePointerUp( e ) {
 		pop();
 
 	}
-	wsPlace = null;
-	window.removeEventListener( 'pointermove', wsPlacePointerMove );
-	window.removeEventListener( 'pointerup', wsPlacePointerUp );
-	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
-	setHint( '🧸 手办工坊：货架上拖个部件按上去 · 拖住时加一指调大小 · 拖下来就收回' );
+	if ( workshop ) setHint( WS_TAB_HINTS[ workshop.tab ] || '' );
 
 }
 
 function beginWsPlace( e, entry, isNew ) {
 
 	wsPlace = { id: e.pointerId, entry, isNew, valid: false, pinch: null, x: e.clientX, y: e.clientY };
-	wsSetGhost( entry, true );
+	if ( entry.kind === 'piece' ) wsSetPieceGhost( entry.piece, true );
+	else wsSetGhost( entry, true );
 	window.addEventListener( 'pointermove', wsPlacePointerMove );
 	window.addEventListener( 'pointerup', wsPlacePointerUp );
 	window.addEventListener( 'pointercancel', wsPlacePointerUp );
+
+}
+
+// 拖一个块开始组装/重放：从块架或树上取下，变幽灵跟手
+function beginWsPiecePlace( e, piece ) {
+
+	if ( piece.attach ) {
+
+		const parent = piece.attach.parent;
+		const i = parent.children.indexOf( piece );
+		if ( i >= 0 ) parent.children.splice( i, 1 );
+		piece.attach = null;
+
+	} else {
+
+		const i = workshop.shelf.indexOf( piece );
+		if ( i >= 0 ) workshop.shelf.splice( i, 1 );
+		renderWsChips();
+
+	}
+	const entry = { kind: 'piece', piece, parent: null, lp: new THREE.Vector3(), ln: new THREE.Vector3( 0, 1, 0 ), k: piece.attach ? piece.attach.k : 1, spin: 0 };
+	beginWsPlace( e, entry, false );
+	wsPlaceMoveTo( e );
+	setHint( '🧩 按到身上就装上 · 加一指捏合调大小、转一转调方向 · 拖到空处松手放回块架' );
 
 }
 
@@ -3666,20 +4280,26 @@ function wsCancelPlace() {
 	if ( wsShelf ) wsShelfCleanup();
 	if ( ! wsPlace ) return;
 	const en = wsPlace.entry;
-	if ( wsPlace.valid ) {
+	const valid = wsPlace.valid;
+	wsPlace = null;
+	window.removeEventListener( 'pointermove', wsPlacePointerMove );
+	window.removeEventListener( 'pointerup', wsPlacePointerUp );
+	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
+
+	if ( en.kind === 'piece' ) {
+
+		wsFinishPiecePlace( en, valid );
+
+	} else if ( valid ) {
 
 		wsSetGhost( en, false );
-		if ( ! workshop.parts.includes( en ) ) workshop.parts.push( en );
+		if ( ! en.piece.parts.includes( en ) ) en.piece.parts.push( en );
 
 	} else {
 
 		wsDiscardEntry( en );
 
 	}
-	wsPlace = null;
-	window.removeEventListener( 'pointermove', wsPlacePointerMove );
-	window.removeEventListener( 'pointerup', wsPlacePointerUp );
-	window.removeEventListener( 'pointercancel', wsPlacePointerUp );
 
 }
 
@@ -3700,7 +4320,7 @@ function wsShelfMove( e ) {
 	wsShelfCleanup();
 	selectWsShelf( null );
 	workshop.placing = null;
-	const entry = wsAddPartEntry( partId );
+	const entry = wsAddPartEntry( workshop.cur, partId );
 	if ( ! entry ) return;
 	beginWsPlace( e, entry, true );
 	wsPlaceMoveTo( e );
@@ -3755,8 +4375,9 @@ function wsPointerDown( e ) {
 
 		if ( e.pointerId !== wsPlace.id && ! wsPlace.pinch && ! wsPlace.entry.fitted ) {
 
-			const d = Math.hypot( e.clientX - wsPlace.x, e.clientY - wsPlace.y );
-			if ( d > 40 ) wsPlace.pinch = { id2: e.pointerId, startDist: d, startK: wsPlace.entry.k };
+			const dx = e.clientX - wsPlace.x, dy = e.clientY - wsPlace.y;
+			const d = Math.hypot( dx, dy );
+			if ( d > 40 ) wsPlace.pinch = { id2: e.pointerId, startDist: d, startK: wsPlace.entry.k, lastAngle: Math.atan2( dy, dx ) };
 
 		}
 		return;
@@ -3765,10 +4386,10 @@ function wsPointerDown( e ) {
 	if ( wsDrag ) return;
 	setRay( e );
 
-	// 握着雕刻工具：按在身上=雕（点一下戳，划过去刻沟），按在空白=照常转转盘
+	// 握着雕刻工具：按在根块上=雕（点一下戳，划过去刻沟），按在空白=照常转转盘
 	if ( workshop.sculptTool ) {
 
-		const hit = wsSurfaceHit();
+		const hit = wsSurfaceHit( 'root' );
 		if ( hit ) { beginWsSculpt( e, hit ); return; }
 
 	}
@@ -3779,7 +4400,7 @@ function wsPointerDown( e ) {
 		const partId = workshop.placing;
 		workshop.placing = null;
 		selectWsShelf( null );
-		const entry = wsAddPartEntry( partId );
+		const entry = wsAddPartEntry( workshop.cur, partId );
 		if ( ! entry ) return;
 		beginWsPlace( e, entry, true );
 		wsPlaceMoveTo( e );
@@ -3787,12 +4408,18 @@ function wsPointerDown( e ) {
 
 	}
 
-	// 点到已放置部件：拿起来重新放
+	// 点到已放置的部件/已挂接的子块：拿起来重新放
 	const picked = pickWsPart();
-	if ( picked ) {
+	if ( picked && picked.part ) {
 
-		beginWsPlace( e, picked, false );
+		beginWsPlace( e, picked.part, false );
 		wsPlaceMoveTo( e );
+		return;
+
+	}
+	if ( picked && picked.piece ) {
+
+		beginWsPiecePlace( e, picked.piece );
 		return;
 
 	}
@@ -4287,11 +4914,21 @@ window.__clay = {
 	// 🧸 工坊开关与状态（测试用）
 	ws: () => { workshop ? exitWorkshop() : enterWorkshop(); return ! ! workshop; },
 	wsSculpt: ( lx, ly, lz, nx, ny, nz, type = - 1 ) => wsSculptAt( { lp: new THREE.Vector3( lx, ly, lz ), ln: new THREE.Vector3( nx, ny, nz ).normalize() }, type ),
-	wsState: () => ( workshop ? {
-		tpl: workshop.tplIndex, ci: workshop.colorIndex, yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ),
-		placing: workshop.placing,
-		parts: workshop.parts.map( ( en ) => ( { p: en.partId, k: + en.k.toFixed( 2 ), x: + en.lp.x.toFixed( 2 ), y: + en.lp.y.toFixed( 2 ), z: + en.lp.z.toFixed( 2 ), twin: !! ( en.twinGroup && en.twinGroup.visible ) } ) ),
-	} : { blend: + camBlend.toFixed( 2 ) } ),
+	wsState: () => {
+
+		if ( ! workshop ) return { blend: + camBlend.toFixed( 2 ) };
+		const pieceInfo = ( p ) => ( {
+			tpl: p.tplIndex, ci: p.colorIndex, sculpt: p.sculpt.length,
+			parts: p.parts.map( ( en ) => ( { p: en.partId, k: + en.k.toFixed( 2 ), x: + en.lp.x.toFixed( 2 ), y: + en.lp.y.toFixed( 2 ), z: + en.lp.z.toFixed( 2 ), twin: !! ( en.twinGroup && en.twinGroup.visible ) } ) ),
+			children: p.children.map( ( c ) => Object.assign( pieceInfo( c ), { at: c.attach ? { x: + c.attach.lp.x.toFixed( 2 ), y: + c.attach.lp.y.toFixed( 2 ), z: + c.attach.lp.z.toFixed( 2 ), k: + c.attach.k.toFixed( 2 ), spin: + ( c.attach.spin || 0 ).toFixed( 2 ) } : null } ) ),
+		} );
+		return {
+			tab: workshop.tab, placing: workshop.placing, shelf: workshop.shelf.length,
+			yaw: + workshop.yaw.toFixed( 2 ), blend: + camBlend.toFixed( 2 ),
+			cur: workshop.cur ? pieceInfo( workshop.cur ) : null,
+		};
+
+	},
 	// 工坊 Stage 1 验证：烘焙身体模板并摆到盘中央看效果/耗时
 	bake: ( i = 0, res = 88 ) => {
 

@@ -142,6 +142,15 @@
 		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: #f2a7c42a; }
 		#workshopBar[data-tab="sculpt"] #wsColorRow { opacity: 0.45; }
 
+		/* R0 块架：chip = 块的实时缩略图；长按收走时复用 holdfill 填充动画 */
+		#wsChipRow button.chip {
+			background-color: #fff;
+			background-size: cover;
+			background-position: center;
+		}
+
+		#wsChipRow button.holding { animation: holdfill 0.7s linear forwards; }
+
 		/* 分段 tab 控件：相连胶囊，和圆形动作钮长得明显不同 */
 		#wsTabs {
 			display: flex;
@@ -255,6 +264,9 @@
 
 	<!-- 手办工坊的工具条：进工坊时替换调色盘。R2 内容行随 R3 的 tab 切换 -->
 	<div id="workshopBar" class="hidden" data-tab="shape">
+		<div class="prow" id="wsChipRow">
+			<button id="wsAddPieceBtn" title="再来一块泥"><svg viewBox="0 0 44 44"><path d="M14,24 Q10,15 18,12 Q20,5 28,8 Q36,8 35,17 Q40,23 33,28 Q31,35 22,33 Q13,35 14,24 Z" fill="#e8cfa8" stroke="#b99a6a" stroke-width="2.4"/><path d="M22,16 V28 M16,22 H28" stroke="#8a6a44" stroke-width="3.6" stroke-linecap="round"/></svg></button>
+		</div>
 		<div class="prow" id="wsColorRow"></div>
 		<div class="prow wsrow" id="wsShapeRow">
 			<button data-shape="0" title="圆滚滚小人"><svg viewBox="0 0 44 44"><circle cx="22" cy="14" r="8" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/><circle cx="22" cy="30" r="10.5" fill="#e8b28a" stroke="#a06b43" stroke-width="2.4"/></svg></button>
