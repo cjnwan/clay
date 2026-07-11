@@ -1717,6 +1717,8 @@ function syncEyes() {
 		let s = age >= 1 ? 1 : easeOutBack( Math.max( 0.03, age ) );
 		if ( rec.popAt && nowMs - rec.popAt < 260 ) s *= 1 + 0.3 * Math.sin( ( nowMs - rec.popAt ) / 260 * Math.PI );
 		rec.mesh.scale.setScalar( s );
+		// 手办轻轻呼吸，看起来是活的
+		if ( rec.kind === 'figure' ) rec.mesh.scale.y = s * ( 1 + 0.018 * Math.sin( nowMs / 650 + rec.id * 1.7 ) );
 
 		if ( rec.kind === 'eye' ) {
 
@@ -2453,6 +2455,7 @@ function setupUI() {
 		if ( Math.abs( next - p.sy ) < 1e-4 ) { shakePalette(); return; }
 		p.sy = next;
 		rebuildWsBody( p, true );
+		wsPulse( wsStage.figure, 0.07 );
 		userTouched = true;
 		squish();
 
@@ -3088,6 +3091,45 @@ function wsPieceCount() {
 
 }
 
+// ---------- 工坊的挤压回弹：落定/雕刻/上台都"duang"一下 ----------
+const wsPulses = [];
+
+// mode 'pulse'=挤压回弹；'in'=从小弹入（easeOutBack）
+function wsPulse( group, amp = 0.22, mode = 'pulse' ) {
+
+	if ( ! group ) return;
+	for ( let i = wsPulses.length - 1; i >= 0; i -- ) {
+
+		if ( wsPulses[ i ].group === group ) { group.scale.setScalar( wsPulses[ i ].base ); wsPulses.splice( i, 1 ); }
+
+	}
+	wsPulses.push( { group, base: group.scale.x, t0: performance.now(), amp, mode } );
+
+}
+
+function tickWsPulses() {
+
+	const now = performance.now();
+	for ( let i = wsPulses.length - 1; i >= 0; i -- ) {
+
+		const p = wsPulses[ i ];
+		const t = ( now - p.t0 ) / 300;
+		if ( t >= 1 ) {
+
+			p.group.scale.setScalar( p.base );
+			wsPulses.splice( i, 1 );
+			continue;
+
+		}
+		const f = p.mode === 'in'
+			? 0.45 + 0.55 * easeOutBack( Math.max( 0.02, t ) )
+			: 1 + p.amp * Math.sin( t * Math.PI ) * ( 1 - t * 0.5 );
+		p.group.scale.setScalar( p.base * f );
+
+	}
+
+}
+
 // 把挂接位姿写到块的 group 上（父块局部系）：底面(+Y)贴着表面法线站，绕法线自转 spin
 function applyPieceAttach( piece ) {
 
@@ -3223,6 +3265,7 @@ function wsSculptAt( hit, type ) {
 	if ( ! n ) return;
 	workshop.cur.sculptOps.push( n );
 	rebuildWsBody( workshop.cur, true );
+	wsPulse( wsStage.figure, 0.07 );
 	if ( type === 1 ) boing(); else squish();
 
 }
@@ -3278,6 +3321,7 @@ function wsSculptPointerUp( e ) {
 
 		workshop.cur.sculptOps.push( d.count );
 		rebuildWsBody( workshop.cur, true );
+		wsPulse( wsStage.figure, 0.07 );
 		if ( d.type === 1 ) boing(); else squish();
 
 	}
@@ -3593,6 +3637,7 @@ function mountCurPiece( piece ) {
 	piece.group.scale.setScalar( piece.k );
 	wsStage.figure.add( piece.group );
 	workshop.cur = piece;
+	wsPulse( piece.group, 0, 'in' );
 
 }
 
@@ -4259,6 +4304,7 @@ function wsFinishPiecePlace( en, valid ) {
 		piece.attach = { parent: en.parent, lp: en.lp.clone(), ln: en.ln.clone(), spin: en.spin || 0 };
 		en.parent.children.push( piece );
 		piece.group.visible = true;
+		wsPulse( piece.group, 0.2 );
 		squish();
 
 	} else {
@@ -4297,6 +4343,8 @@ function wsPlacePointerUp( e ) {
 
 		wsSetGhost( en, false );
 		if ( ! en.piece.parts.includes( en ) ) en.piece.parts.push( en );
+		wsPulse( en.group, 0.3 );
+		if ( en.twinGroup && en.twinGroup.visible ) wsPulse( en.twinGroup, 0.3 );
 		userTouched = true;
 		markDirty(); // 半成品也进自动存档
 		squish();
@@ -4544,6 +4592,34 @@ function frameUpdate( dt ) {
 
 		}
 		wsStage.figure.rotation.y = workshop.yaw;
+		tickWsPulses();
+
+		// 工坊里的眼睛也会眨
+		const nowMs = performance.now();
+		wsWalkTree( ( pc ) => {
+
+			for ( const en of pc.parts ) {
+
+				if ( en.partId !== 'eye' ) continue;
+				if ( ! en.nextBlink ) en.nextBlink = nowMs + 1500 + Math.random() * 3000;
+				if ( nowMs >= en.nextBlink ) {
+
+					en.blinkUntil = nowMs + 130;
+					en.nextBlink = nowMs + 1800 + Math.random() * 3500;
+
+				}
+				const blink = nowMs < en.blinkUntil;
+				for ( const m of [ en.mesh, en.twinMesh ] ) {
+
+					if ( ! m || ! m.children || m.children.length < 2 ) continue;
+					m.children[ 0 ].scale.y = blink ? 0.15 : 1;
+					m.children[ 1 ].visible = ! blink;
+
+				}
+
+			}
+
+		} );
 
 	}
 
@@ -4854,8 +4930,16 @@ function jitter( v, pct ) {
 }
 
 // 剪刀：两声干脆的“咔嚓”
+// 手机轻震：跟拟音走，安卓有感，iOS 自动忽略
+function buzz( ms ) {
+
+	try { if ( navigator.vibrate ) navigator.vibrate( ms ); } catch ( err ) {}
+
+}
+
 function snip() {
 
+	buzz( 10 );
 	tone( 'square', 1250, 720, 0.035, 0.07 );
 	setTimeout( () => tone( 'square', 950, 520, 0.04, 0.07 ), 45 );
 
@@ -4864,6 +4948,7 @@ function snip() {
 // 上色：极轻的一点
 function dabTick() {
 
+	buzz( 4 );
 	tone( 'sine', jitter( 620, 0.15 ), 380, 0.05, 0.07 );
 
 }
@@ -4871,6 +4956,7 @@ function dabTick() {
 // 落下：低频“咚”的肉感 + 短促的“啪”
 function plop() {
 
+	buzz( 12 );
 	tone( 'sine', jitter( 200, 0.15 ), 85, jitter( 0.12, 0.2 ), 0.3 );
 	noiseBurst( jitter( 650, 0.2 ), 180, 0.06, 0.09 );
 
@@ -4879,6 +4965,7 @@ function plop() {
 // 弹跳：欢快的上滑 + 一点弹簧尾音
 function boing() {
 
+	buzz( 8 );
 	const f1 = jitter( 480, 0.12 );
 	tone( 'sine', 170, f1, 0.11, 0.16 );
 	tone( 'sine', f1, f1 * 0.8, 0.07, 0.06 );
@@ -4888,6 +4975,7 @@ function boing() {
 // 拆开：湿黏的“啵”
 function pop() {
 
+	buzz( 8 );
 	tone( 'triangle', jitter( 280, 0.15 ), 850, 0.07, 0.13 );
 	bandBurst( 1400, 500, jitter( 0.07, 0.2 ), 0.1, 3 );
 
@@ -4900,6 +4988,7 @@ function squish() {
 	const now = performance.now();
 	if ( now - lastSquishAt < 80 ) return;
 	lastSquishAt = now;
+	buzz( 14 );
 	bandBurst( jitter( 950, 0.2 ), 240, jitter( 0.16, 0.25 ), 0.2, 2.2 );
 	bandBurst( jitter( 2100, 0.2 ), 600, 0.09, 0.05, 5 );
 	tone( 'sine', jitter( 140, 0.15 ), 70, 0.07, 0.12 );

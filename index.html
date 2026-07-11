@@ -161,6 +161,11 @@
 			background-color: #fff;
 			background-size: cover;
 			background-position: center;
+			animation: chipin 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+		}
+
+		@keyframes chipin {
+			from { transform: rotate(var(--rot, 0deg)) scale(0.2); }
 		}
 
 		#wsChipRow button.holding { animation: holdfill 0.7s linear forwards; }

@@ -84,6 +84,22 @@ export function buildWorkshopStage( scene ) {
 	top.position.y = 0.3;
 	g.add( base, top );
 
+	// 手办脚下的软阴影：一张径向渐变贴图，给足接地感
+	const cnv = document.createElement( 'canvas' );
+	cnv.width = cnv.height = 128;
+	const ctx = cnv.getContext( '2d' );
+	const grd = ctx.createRadialGradient( 64, 64, 8, 64, 64, 64 );
+	grd.addColorStop( 0, 'rgba(60,40,20,0.34)' );
+	grd.addColorStop( 1, 'rgba(60,40,20,0)' );
+	ctx.fillStyle = grd;
+	ctx.fillRect( 0, 0, 128, 128 );
+	const shadow = new THREE.Mesh(
+		new THREE.CircleGeometry( 1.25, 32 ),
+		new THREE.MeshBasicMaterial( { map: new THREE.CanvasTexture( cnv ), transparent: true, depthWrite: false } ) );
+	shadow.rotation.x = - Math.PI / 2;
+	shadow.position.y = 0.387;
+	g.add( shadow );
+
 	const figure = new THREE.Group();
 	figure.position.y = 0.38;
 	g.add( figure );
