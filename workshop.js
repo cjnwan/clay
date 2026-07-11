@@ -52,6 +52,14 @@ export const BODY_TEMPLATES = [
 		{ o: [ - 0.28, 0.44, 0.28 ], r: 0.42 },
 		{ o: [ 0.28, 0.44, 0.28 ], r: 0.42 },
 	] },
+	{ name: '圆锥', balls: [
+		{ o: [ 0, 0.4, 0 ], r: 0.56 },
+		{ o: [ 0, 0.92, 0 ], r: 0.34 },
+		{ o: [ 0, 1.3, 0 ], r: 0.18 },
+	] },
+	{ name: '半球', balls: [
+		{ o: [ 0, 0.08, 0 ], r: 0.66 }, // 球心压到底面下：域底裁切出一个圆顶
+	] },
 ];
 
 // 雕刻手感与黏土板一致（负球=坑、正球=包）
@@ -144,6 +152,87 @@ export const PARTS = {
 		return new THREE.Mesh( new THREE.SphereGeometry( 0.055, 12, 10 ), mat );
 
 	} },
+	// —— 题材扩展包：车辆 / 怪兽 / 小人都有得搭 ——
+	wheel: { name: '轮子', paired: true, sink: 0.02, role: 'own', build: ( mat ) => {
+
+		const g = new THREE.Group();
+		const tire = new THREE.Mesh( new THREE.TorusGeometry( 0.16, 0.075, 12, 24 ),
+			new THREE.MeshStandardMaterial( { color: 0x3a3430, roughness: 0.8 } ) );
+		const hub = new THREE.Mesh( new THREE.CylinderGeometry( 0.09, 0.09, 0.1, 16 ), mat );
+		hub.rotation.x = Math.PI / 2;
+		g.add( tire, hub );
+		return g;
+
+	} },
+	wing: { name: '翅膀', paired: true, sink: 0.06, role: 'own', build: ( mat ) => {
+
+		const m = new THREE.Mesh( new THREE.SphereGeometry( 0.34, 20, 14 ), mat );
+		m.scale.set( 0.5, 0.16, 1 ); // 扁长的一片
+		m.position.z = 0.24;
+		m.rotation.x = - 0.5;        // 翼尖翘起
+		return m;
+
+	} },
+	horn: { name: '尖角', paired: false, sink: 0.03, role: 'own', build: ( mat ) => {
+
+		const geo = new THREE.ConeGeometry( 0.13, 0.42, 14 );
+		geo.rotateX( Math.PI / 2 ); // 锥尖朝 +Z（外）
+		geo.translate( 0, 0, 0.16 );
+		return new THREE.Mesh( geo, mat );
+
+	} },
+	tail: { name: '尾巴', paired: false, sink: 0.05, role: 'own', build: ( mat ) => {
+
+		const curve = new THREE.CatmullRomCurve3( [
+			new THREE.Vector3( 0, 0, 0 ),
+			new THREE.Vector3( 0, 0.05, 0.22 ),
+			new THREE.Vector3( 0, 0.22, 0.38 ),
+			new THREE.Vector3( 0, 0.42, 0.42 ),
+		] );
+		const g = new THREE.Group();
+		g.add( new THREE.Mesh( new THREE.TubeGeometry( curve, 12, 0.085, 10 ), mat ) );
+		const tip = new THREE.Mesh( new THREE.SphereGeometry( 0.09, 12, 10 ), mat );
+		tip.position.set( 0, 0.42, 0.42 );
+		g.add( tip );
+		return g;
+
+	} },
+	cap: { name: '小帽子', paired: false, sink: 0.02, role: 'own', build: ( mat ) => {
+
+		const g = new THREE.Group();
+		const dome = new THREE.Mesh( new THREE.SphereGeometry( 0.26, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2 ), mat );
+		dome.rotation.x = Math.PI / 2; // 圆顶朝 +Z（外）
+		dome.scale.set( 1, 1, 0.75 );
+		const brim = new THREE.Mesh( new THREE.CylinderGeometry( 0.3, 0.3, 0.045, 24 ), mat );
+		brim.rotation.x = Math.PI / 2;
+		g.add( dome, brim );
+		return g;
+
+	} },
+	star: { name: '星星', paired: false, sink: 0.015, role: 'own', build: ( mat ) => {
+
+		const sh = new THREE.Shape();
+		for ( let i = 0; i < 10; i ++ ) {
+
+			const a = ( i / 10 ) * Math.PI * 2 - Math.PI / 2;
+			const r = i % 2 === 0 ? 0.17 : 0.075;
+			i === 0 ? sh.moveTo( Math.cos( a ) * r, Math.sin( a ) * r ) : sh.lineTo( Math.cos( a ) * r, Math.sin( a ) * r );
+
+		}
+		return new THREE.Mesh( new THREE.ExtrudeGeometry( sh, { depth: 0.05, bevelEnabled: false } ), mat );
+
+	} },
+	heart: { name: '爱心', paired: false, sink: 0.015, role: 'own', build: ( mat ) => {
+
+		const sh = new THREE.Shape();
+		sh.moveTo( 0, - 0.13 );
+		sh.bezierCurveTo( 0.14, - 0.02, 0.17, 0.06, 0.09, 0.12 );
+		sh.bezierCurveTo( 0.03, 0.16, 0, 0.1, 0, 0.06 );
+		sh.bezierCurveTo( 0, 0.1, - 0.03, 0.16, - 0.09, 0.12 );
+		sh.bezierCurveTo( - 0.17, 0.06, - 0.14, - 0.02, 0, - 0.13 );
+		return new THREE.Mesh( new THREE.ExtrudeGeometry( sh, { depth: 0.05, bevelEnabled: false } ), mat );
+
+	} },
 };
 
 // 造一个部件实例：独立材质（幽灵态要单独调透明度），黏土质感与本体一致
@@ -174,11 +263,11 @@ export function buildPart( partId, colorHex ) {
 
 // 头套：身体网格沿法线膨胀一圈 + 剪出脸部开口 + 底部收口 + 开口卷边。
 // —— 截图里"玩偶服露脸"的关键：开口边界是网格边，硬边界无条件成立
-export function buildHoodPart( bodyGeo, template, y0, colorHex ) {
+export function buildHoodPart( bodyGeo, template, y0, colorHex, sy = 1 ) {
 
 	const OFF = 0.055;                                         // 布料厚度感
 	const head = template.balls[ template.balls.length - 1 ];  // 约定：最后一球是头
-	const hc = new THREE.Vector3( head.o[ 0 ], head.o[ 1 ] - y0, head.o[ 2 ] );
+	const hc = new THREE.Vector3( head.o[ 0 ], ( head.o[ 1 ] - y0 ) * sy, head.o[ 2 ] );
 	const faceDir = new THREE.Vector3( 0, 0.1, 1 ).normalize();
 	const fc = hc.clone().addScaledVector( faceDir, head.r );  // 脸开口球心（头表面上）
 	const rOpen = head.r * 0.8;
@@ -236,7 +325,9 @@ export function buildHoodPart( bodyGeo, template, y0, colorHex ) {
 
 // 把模板烘焙成静态 BufferGeometry 网格。
 // 域取紧立方包围盒；域底比最低点略高一点，边界裁切自然给出"坐得平"的压扁底。
-export function bakeBodyMesh( template, material, res = 88, sculpt = null ) {
+// sy = 纵向拉伸（0.65 矮胖 ~ 1.5 瘦高）：对烘焙后的几何体绕基座原点缩放，
+// 法线按逆转置修正（ny/sy 再归一化），所有形状都能连续变高变扁
+export function bakeBodyMesh( template, material, res = 88, sculpt = null, sy = 1 ) {
 
 	const t0 = performance.now();
 
@@ -296,6 +387,19 @@ export function bakeBodyMesh( template, material, res = 88, sculpt = null ) {
 	geo.setAttribute( 'normal', new THREE.BufferAttribute( mc.geometry.getAttribute( 'normal' ).array.slice( 0, n * 3 ), 3 ) );
 	geo.scale( s, s, s );
 	geo.translate( cx, cy - y0, cz ); // 压平的底落在局部 y≈0，摆上桌面即坐平
+	if ( sy !== 1 ) {
+
+		geo.scale( 1, sy, 1 ); // 绕基座拉伸/压扁
+		const nn = geo.getAttribute( 'normal' );
+		for ( let i = 0; i < nn.count; i ++ ) {
+
+			const nx = nn.getX( i ), ny = nn.getY( i ) / sy, nz = nn.getZ( i );
+			const l = Math.hypot( nx, ny, nz ) || 1;
+			nn.setXYZ( i, nx / l, ny / l, nz / l );
+
+		}
+
+	}
 	mc.geometry.dispose();
 
 	const mesh = new THREE.Mesh( geo, material );
