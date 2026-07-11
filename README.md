@@ -54,7 +54,28 @@ joints for the "sticky clay" behavior) — the same pairing mrdoob/toys uses.
   creation.
 - **🎥 clip** — records a 5-second orbit of your creation and saves it as a video
   (webm on Chrome, mp4 on Safari) — your build becomes a shareable short.
-- **🧹** — hold to clear the board.
+- **🧹** — hold to clear the board. **Drag anything past the board rim** to take away
+  just that piece (its welded friends come along).
+
+## 🧸 Figure workshop
+
+Tap the figure button for the turntable workshop — a gravity-free atelier where figures
+are built piece by piece and assembled:
+
+- **Three tabs** on the segmented control (mode = theme color): **shape** (blue) picks
+  one of 8 bases — 3 chibi bodies plus ball / egg / pancake / sausage / brick; **sculpt**
+  (orange) pokes dents, drags grooves and raises bumps (auto-mirrored across the midline,
+  3 brush sizes, per-stroke undo — the body re-bakes in ~25 ms); **decorate** (pink) is
+  the parts shelf — kigurumi hood with a face opening, googly eyes, mouth, dots, ears,
+  arms, pressed color patches, all mirror-paired and surface-snapped.
+- **Piece shelf**: [＋] parks the current piece as a live-thumbnail chip and starts a
+  fresh ball. Tap a chip to bring it back; **drag a chip onto the figure to attach it**
+  (second finger: pinch = size, twist = spin); pick an attached piece and drag it off to
+  send it back to the shelf — hand-made pieces are never destroyed. Long-press a chip to
+  discard it.
+- **✓ Done** drops the whole assembly onto the physics board as one toy — drag it, hop
+  it, film it. Shelf pieces stay in the workshop for the next build, and everything
+  (including half-done work) rides the URL-hash share link.
 
 Works with mouse and touch (pointer events throughout).
 

@@ -71,10 +71,14 @@ Default tab = 形状 (inert). Theme color tints content row + brush ring. R1 dim
 
 ## Stages (each independently shippable)
 
-1. Panel rebuild (tabs, no R0) + shape tab + retire 换身体 button.  ← DONE in commit (with #2)
-2. Sculpt tab wired (engine already landed: beads, mirror, per-op undo, brush tiers).  ← DONE
-3. pieces[] + R0 chip shelf + thumbnails + v2 save + migration. ✓ still single-piece.
-4. Assembly (chip drag-on, spin, tree attach, detach-to-shelf) + compound-collider Done.
+1. Panel rebuild (tabs, no R0) + shape tab + retire 换身体 button.  ← DONE (3bfa2cb)
+2. Sculpt tab wired (engine already landed: beads, mirror, per-op undo, brush tiers).  ← DONE (3bfa2cb)
+3. pieces[] + R0 chip shelf + thumbnails + v2 save + migration.  ← DONE (79e9396)
+4. Assembly (chip drag-on, spin, tree attach, detach-to-shelf) + compound-collider Done.  ← DONE (79e9396)
+   Deviations from spec: ✓ Done still EXITS to the board (keeps the payoff moment of the toy
+   landing; shelf persists in wsKeep either way, next enter auto-promotes a shelf piece).
+   Parts may be placed on ANY piece of the assembly (re-host while sliding); sculpt = root only.
+   Piece-k idle pinch (0.6–1.6) not implemented; attach-k pinch during placement covers sizing.
 5. Gray-release polish: live low-res sculpt preview, ⭐ stamp part, part-row paging, kid tests
    (mis-sculpt rate, chip long-press, rolling stability, URL length), part re-projection.
 
