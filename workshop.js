@@ -100,6 +100,14 @@ export function buildWorkshopStage( scene ) {
 	shadow.position.y = 0.387;
 	g.add( shadow );
 
+	// 一圈低饱和彩毯：转盘台立刻有"儿童房舞台"感
+	const rug = new THREE.Mesh(
+		new THREE.RingGeometry( 1.58, 1.98, 48 ),
+		new THREE.MeshStandardMaterial( { color: 0xD9A8B8, roughness: 0.95 } ) );
+	rug.rotation.x = - Math.PI / 2;
+	rug.position.y = 0.222;
+	g.add( rug );
+
 	const figure = new THREE.Group();
 	figure.position.y = 0.38;
 	g.add( figure );

@@ -177,7 +177,18 @@ async function init() {
 
 	// 场景与相机
 	scene = new THREE.Scene();
-	scene.background = new THREE.Color( BG );
+	// 天空：暖色垂直渐变（上杏下沙），世界立刻有了"上下"——纯美术参数，不动渲染逻辑
+	const skyCnv = document.createElement( 'canvas' );
+	skyCnv.width = 1;
+	skyCnv.height = 256;
+	const skyCtx = skyCnv.getContext( '2d' );
+	const skyGrad = skyCtx.createLinearGradient( 0, 0, 0, 256 );
+	skyGrad.addColorStop( 0, '#F9EBD4' );
+	skyGrad.addColorStop( 0.55, '#EFE0C8' );
+	skyGrad.addColorStop( 1, '#E2CBA4' );
+	skyCtx.fillStyle = skyGrad;
+	skyCtx.fillRect( 0, 0, 1, 256 );
+	scene.background = new THREE.CanvasTexture( skyCnv );
 	scene.fog = new THREE.Fog( BG, 14, 26 );
 
 	// 环境光照（PMREM）：材质的“润”主要来自这里；强度压低，别冲掉暖色
