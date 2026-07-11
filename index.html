@@ -229,11 +229,16 @@
 		   ============================================================ */
 		#workshopBar .wsrow { display: none; border-radius: var(--r-row); padding: 4px 10px; }
 
-		#workshopBar[data-tab="shape"] #wsShapeRow { display: flex; background: color-mix(in srgb, var(--mode-shape) 30%, transparent); }
+		#workshopBar[data-tab="shape"] #wsShapeRow { display: flex; background: color-mix(in srgb, var(--mode-shape) 30%, transparent); animation: rowin 0.3s var(--ease-out); }
 
-		#workshopBar[data-tab="sculpt"] #wsSculptRow { display: flex; background: color-mix(in srgb, var(--mode-sculpt) 32%, transparent); }
+		#workshopBar[data-tab="sculpt"] #wsSculptRow { display: flex; background: color-mix(in srgb, var(--mode-sculpt) 32%, transparent); animation: rowin 0.3s var(--ease-out); }
 
-		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: color-mix(in srgb, var(--mode-deco) 34%, transparent); }
+		#workshopBar[data-tab="deco"] #wsPartRow { display: flex; background: color-mix(in srgb, var(--mode-deco) 34%, transparent); animation: rowin 0.3s var(--ease-out); }
+
+		/* tab 切换：新工具行轻轻浮上来（只动 transform/opacity，合成器友好） */
+		@keyframes rowin {
+			from { opacity: 0; transform: translateY(10px); }
+		}
 
 		/* 托盘顶缘同步染一道模式色光 */
 		#workshopBar[data-tab="shape"] { box-shadow: 0 -10px 32px var(--shadow-soft), inset 0 3px 0 color-mix(in srgb, var(--mode-shape) 55%, white), inset 0 -12px 24px rgba(122, 90, 54, 0.05); }
